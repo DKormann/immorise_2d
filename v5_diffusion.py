@@ -3,7 +3,6 @@ import numpy as np
 import torch 
 import matplotlib.pyplot as plt
 
-
 # %%
 class Mesh:
   def __init__(self, edges: torch.Tensor):
@@ -55,23 +54,39 @@ plt.scatter(*v.T)
 
 # %%
 
-def gen_data(n):
+def gen_data(n,t):
   train_shapes = [random_shape() for _ in range(n)]
   x = [s.pointcloud(100) for s in train_shapes]
   y = [s.edges for s in train_shapes]
   x = torch.stack(x)
-  maxverts = max([len(x) for x in y])
-  assert maxverts == 18 
+  maxverts = 18
   y = [torch.cat([y.reshape(-1,4), torch.ones(len(y), 1)], dim=1) for y in y]
-  y = torch.stack([torch.cat([y, torch.zeros(maxverts - len(y), 5)]) for y in y]).reshape(-1, maxverts*5)
-  return x, y
+  y = torch.stack([torch.cat([y, torch.zeros(maxverts - len(y), 5)]) for y in y])
+  s = torch.randn(n, 18, 5) 
+  s[:,:,4] = s[:,:,4].sigmoid()
+  s = y * t + s * (1-t)    
+  s = torch.cat([s, torch.ones(n, 18, 1)*t], dim=2)
+  return x, s, y
+
+
+x,s,y = gen_data(10,.3)
+k = 0
+
+edges = y[k].reshape(-1,5)[:,:4].reshape( 18, 2, 2)
+pmask = y[k].reshape(-1,5)[:,4].reshape( 18, 1)
+for edge in edges: plt.plot(*edge.T, c='black')
+
+sedges = s[k].reshape(-1,6)[:,:4].reshape( 18, 2, 2)
+smask = s[k].reshape(-1,6)[:,4].reshape( 18, 1)
+for edge,m in zip(sedges,smask): plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
+
 #%%
 
 from torch.nn import TransformerEncoderLayer, Linear, Sequential
 from torch.optim import Adam
 
-output_dim = 18 * 5
-hidden_dim = 512
+max_edges = 18
+hidden_dim = 1024
 nhead = 4
 inducing_points = 18
 
@@ -90,110 +105,89 @@ class MAB(torch.nn.Module):
 class Model(torch.nn.Module):
   def __init__(self, hidden_dim, nhead, k):
     super(Model, self).__init__()
+    self.pointemb = Linear(2, hidden_dim)
+    self.edgeemb = Linear(6, hidden_dim)
     
-    self.embedding = Linear(2, hidden_dim)
     self.mab1 = MAB(hidden_dim,nhead,dropout=0.1)
     self.mab2 = MAB(hidden_dim,nhead,dropout=0.1)
-    self.mab3 = MAB(hidden_dim,nhead,dropout=0.1)
-    self.mab4 = MAB(hidden_dim,nhead,dropout=0.1)
+
     self.adapter = Linear(hidden_dim, 5)
-    self.inducing_points = torch.nn.Parameter(torch.randn(k, hidden_dim))
-    self.norm = torch.nn.LayerNorm(hidden_dim)
 
-  def forward(self, x):
-    x = self.embedding(x)
-    p = self.inducing_points.repeat(x.shape[0],1,1)
 
-    p = self.mab1(p,x)
-    p = self.mab2(p,p) + p
-    p = self.mab3(p,x) + p
-    p = self.mab4(p,p) + p
+  def forward(self, x, s):
+    x = self.pointemb(x)
+    p = self.edgeemb(s)    
+    p = self.mab1(p,x) + self.mab2(p,p)
+    res = self.adapter(p) + s[:,:,:5]
+    res[:,:,4] = res[:,:,4].sigmoid()
+    return res
 
-    p = self.adapter(p).reshape(-1,18,5)
-    p[:,:,-1] = p[:,:,-1].sigmoid()
-    return p
+  def diffusion(self, x):
+    s = torch.randn(x.shape[0], 18, 6) * 0.05
+    s[:,:,4] = s[:,:,4].sigmoid()
+    s[:,:,5] = 0.
+
+    for i in range(10,0,-1):
+      p = torch.cat([self.forward(x, s), torch.ones(x.shape[0], 18, 1)], dim=2)
+      s = s * (i-1)/i + p * 1/i
+
+    return s
 
   def save(self, path): torch.save(self.state_dict(), path)
   def load(self, path): self.load_state_dict(torch.load(path))
 
 
-train_x, train_y = gen_data(200)
+train_x, train_s, train_y = gen_data(200,0.1)
 model = Model(hidden_dim, nhead, inducing_points)
-print(model(train_x[:2]).shape)
-optimizer = Adam(model.parameters(), lr=0.001)
 
+pred = model.diffusion(train_x[:2])
+optimizer = Adam(model.parameters(), lr=0.001)
 
 #%% helper funcs
 def loss_fn(p, y):
-  p = p.reshape(-1,18,5)
-  y = y.reshape(-1,18,5)
+  mask = y[:,:,4].unsqueeze(2)
+  pmask = p[:,:,4].unsqueeze(2)
+  dist = (p[:,:,:4] - y[:,:,:4])**2 * mask
+  geom_loss = dist.sum() / mask.sum()
+  mask_loss = torch.nn.functional.binary_cross_entropy(pmask, mask)
+  return geom_loss + mask_loss
 
-  new_y = torch.zeros_like(p)
-  for i, (pshape, yshape) in enumerate(zip(p,y)):
-    reordered_y = []
-    for pedge in pshape:
-      dists = torch.norm(pedge - yshape[:], dim=1)
-      closest = dists.argmin()
-      reordered_y.append(yshape[closest])
-      yshape = torch.cat([yshape[:closest], yshape[closest+1:]])
-    yshape = torch.stack(reordered_y)
-    new_y[i] = yshape
-  
-  y = new_y
-  mask = y[:,:,4:]
-  pred_mask = p[:,:,4:]
-  
-  masked_dists = (p[:,:,:4] - y[:,:,:4])**2 * mask
-  geom_loss = masked_dists.sum()/mask.sum()
-  
-  mask_loss = torch.nn.functional.binary_cross_entropy(pred_mask, mask, reduction='mean')
-  return geom_loss + mask_loss, y
-
-def step(x,y):
+def step(t):
+  x,s,y = gen_data(200,t)
+  p = model(x,s)
+  loss = loss_fn(p,y)
   optimizer.zero_grad()
-  p = model(x)
-  loss, reordered_y = loss_fn(p, y)
   loss.backward()
   optimizer.step()
-  print(f'\rloss:{loss.item()}',end='')
-  return p, reordered_y
+  return loss.item()
 
-def display(p,x,y):
-  k = np.random.randint(0, len(x))
-  p_edges = p[k].reshape(-1,5)[:,:4].reshape( 18, 2, 2)
-  y_edges = y[k].reshape(-1,5)[:,:4].reshape( 18, 2, 2)
-  pmask = p[k].reshape(-1,5)[:,4:].reshape( 18, 1)
-  for edge, yedge in zip(p_edges, y_edges):
-    if yedge.sum() != 0:
-      plt.plot([edge[0,0], yedge[0,0]], [edge[0,1], yedge[0,1]], c='red')
-      plt.plot([edge[1,0], yedge[1,0]], [edge[1,1], yedge[1,1]], c='red')
 
-  for edge in y_edges: plt.plot(*edge.T, c='black')
-  for edge,m in zip(p_edges,pmask): plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
-  
-  plt.scatter(*x[k].T, c='gray')
-
-p,newy=step(train_x,train_y)
-display(p.detach(),train_x,newy)
-
-#%%
-optimizer.param_groups[0]['lr'] = 0.0001
+loss_table = [0] * 10
 #%%
 try:
-  for i in range(1000):
-    train_x, train_y = gen_data(200)
-    _,newy = step(train_x,train_y)  
-    if i % 10 == 0: print(f'\nepoch {i}')
-except: pass
+  
+  n = 2000
+  for i in range(n):
+    t = np.random.randint(0,10)
+    l = step(t/10)
+    loss_table[t] = loss_table[t]* 0.9 + l*0.1 
+    print(f'\repoch {i}/{n} loss: [{" ".join(map(lambda x: str(round(x,3)), loss_table))}] ',end='')
+    if i % (2000//10) == 0: print()
+except KeyboardInterrupt: pass
 
 #%%
 
-with torch.no_grad(): 
-  p = model.train(False).forward(train_x)
-for _ in range(10):
-  loss, newy = loss_fn(p, train_y)
-  display(p,train_x,newy)
-  plt.show()
+x,s,y = gen_data(1,0.8)
+p = model(x,s).detach()
 
-#%%
-torch.save(model.state_dict(), 'mab4model.pth')
+edges = y.reshape(-1,5)[:,:4].reshape( 18, 2, 2)
+
+pedges = p.reshape(-1,5)[:,:4].reshape( 18, 2, 2)
+pmask = p.reshape(-1,5)[:,4].reshape( 18, 1)
+for edge,m in zip(pedges,pmask): plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
+
+sedges = s.reshape(-1,6)[:,:4].reshape( 18, 2, 2)
+smask = s.reshape(-1,6)[:,4].reshape( 18, 1)
+for edge,m in zip(sedges,smask): plt.plot(*edge.T, c=plt.colormaps['Greens'](m.item()))
+plt.scatter(*x[0].T)
+

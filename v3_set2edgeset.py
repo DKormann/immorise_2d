@@ -122,9 +122,9 @@ print(model(train_x[:2]).shape)
 optimizer = Adam(model.parameters(), lr=0.001)
 
 #%%
-model= SetTransformer(input_dim, hidden_dim, output_dim, nhead, num_layers)
-try: model.load('set2edgesetmodel.pth')
-except: print('No model found')
+# model= SetTransformer(input_dim, hidden_dim, output_dim, nhead, num_layers)
+# try: model.load('set2edgesetmodel.pth')
+# except: print('No model found')
 
 #%%
 def loss_fn(p, y):
@@ -177,8 +177,9 @@ def display(p,x,y):
 
   for edge, yedge in zip(p_edges, y_edges):
     if yedge.sum() != 0:
-      plt.plot(*edge.T, c='red')
-      plt.plot(*yedge.T, c='black')
+      plt.plot([edge[0,0], yedge[0,0]], [edge[0,1], yedge[0,1]], c='red')
+      plt.plot([edge[1,0], yedge[1,0]], [edge[1,1], yedge[1,1]], c='red')
+
     
   for edge in y_edges: plt.plot(*edge.T, c='black')
   for edge in p_edges: plt.plot(*edge.T, c='blue')
