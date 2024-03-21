@@ -51,37 +51,22 @@ shape = random_shape()
 shape.plot()
 v = shape.pointcloud(200)
 plt.scatter(*v.T)
-
 # %%
 
-# def gen_data(n,t):
-#   train_shapes = [random_shape() for _ in range(n)]
-#   x = [s.pointcloud(100) for s in train_shapes]
-#   y = [s.edges for s in train_shapes]
-#   x = torch.stack(x)
-#   maxverts = 18
-#   y = [torch.cat([y.reshape(-1,4), torch.ones(len(y), 1)], dim=1) for y in y]
-#   y = torch.stack([torch.cat([y, torch.zeros(maxverts - len(y), 5)]) for y in y])
-#   s = torch.randn(n, 18, 5) 
-#   s[:,:,4] = s[:,:,4].sigmoid()
-#   s = y * t + s * (1-t)    
-#   s = torch.cat([s, torch.ones(n, 18, 1)*t], dim=2)
-#   return x, s, y
+train_shape = random_shape()
+#%%
 
+maxedges = 18
 
-# x,s,y = gen_data(10,.3)
-# k = 0
-
-# edges = y[k].reshape(-1,5)[:,:4].reshape( 18, 2, 2)
-# pmask = y[k].reshape(-1,5)[:,4].reshape( 18, 1)
-# for edge in edges: plt.plot(*edge.T, c='black')
-
-# sedges = s[k].reshape(-1,6)[:,:4].reshape( 18, 2, 2)
-# smask = s[k].reshape(-1,6)[:,4].reshape( 18, 1)
-# for edge,m in zip(sedges,smask): plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
-
-
-# %%
-
-
-
+def gen_data(n):
+  train_shapes = [random_shape() for _ in range(n)]
+  c = [s.pointcloud(100) for s in train_shapes]
+  c = torch.stack(c)
+  y = [s.edges for s in train_shapes]
+  y = [torch.cat([y.reshape(-1,4), torch.ones(len(y), 1)], dim=1) for y in y]
+  y = torch.stack([torch.cat([y, torch.zeros(maxedges - len(y), 5)])for y in y])
+  x = torch.cat([torch.zeros(n, 1, 5), y], dim=1)
+  y = torch.cat([y, torch.zeros(n, 1, 5)], dim=1)
+  return c, x, y
+  
+c,x,y = gen_data(10)
