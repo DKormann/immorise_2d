@@ -168,12 +168,6 @@ def display(p,x,y):
   pmask = p[k].reshape(-1,5)[:,4:].reshape( 18, 1)
 
 
-  # for edge,m, yedge in zip(p_edges, pmask, y_edges): 
-  #   if yedge.sum() != 0:
-  #     plt.plot([edge[0,0], yedge[0,0]], [edge[0,1], yedge[0,1]], c='red')
-  #     plt.plot([edge[1,0], yedge[1,0]], [edge[1,1], yedge[1,1]], c='red')
-  #   plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
-  #   plt.plot(*yedge.T, c='black')
 
   for edge, yedge in zip(p_edges, y_edges):
     if yedge.sum() != 0:

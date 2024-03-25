@@ -63,7 +63,7 @@ def gen_data(n):
   maxverts = max([len(x) for x in y])
   assert maxverts == 18 
   y = [torch.cat([y.reshape(-1,4), torch.ones(len(y), 1)], dim=1) for y in y]
-  y = torch.stack([torch.cat([y, torch.zeros(maxverts - len(y), 5)]) for y in y]).reshape(-1, maxverts*5)
+  y = torch.stack([torch.cat([y, torch.zeros(maxverts - len(y), 5)]) for y in y])
   return x, y
 #%%
 
@@ -117,10 +117,10 @@ class Model(torch.nn.Module):
   def load(self, path): self.load_state_dict(torch.load(path))
 
 
-train_x, train_y = gen_data(200)
+x, y = gen_data(200)
 model = Model(hidden_dim, nhead, inducing_points)
-print(model(train_x[:2]).shape)
-optimizer = Adam(model.parameters(), lr=0.001)
+print(model(x[:2]).shape)
+optimizer = Adam(model.parameters(), lr=0.0001)
 
 
 #%% helper funcs
@@ -173,27 +173,90 @@ def display(p,x,y):
   
   plt.scatter(*x[k].T, c='gray')
 
-p,newy=step(train_x,train_y)
-display(p.detach(),train_x,newy)
+p,newy=step(x,y)
+display(p.detach(),x,newy)
 
-#%%
-optimizer.param_groups[0]['lr'] = 0.0001
 #%%
 try:
   for i in range(1000):
-    train_x, train_y = gen_data(200)
-    _,newy = step(train_x,train_y)  
+    x, y = gen_data(200)
+    _,newy = step(x,y)
     if i % 10 == 0: print(f'\nepoch {i}')
 except: pass
 
 #%%
+model.load('mab4model.pth')
+#%%
 
-with torch.no_grad(): 
-  p = model.train(False).forward(train_x)
+with torch.no_grad(): p = model.train(False).forward(x)
 for _ in range(10):
-  loss, newy = loss_fn(p, train_y)
-  display(p,train_x,newy)
+  loss, newy = loss_fn(p, y)
+  display(p,x,newy)
   plt.show()
 
 #%%
-torch.save(model.state_dict(), 'mab4model.pth')
+
+# %%
+
+p = p.detach()
+p.requires_grad = True
+
+#%%
+
+def dist_mat(p,y):
+  
+  p = p.unsqueeze(2)
+  y = y.unsqueeze(1)
+  
+  pmask = p[:,:,:,4].repeat(1,1,18)
+  ymask = y[:,:,:,4].repeat(1,18,1)
+  mask_dist = torch.nn.functional.binary_cross_entropy(pmask, ymask,reduction='none')
+
+  dist = torch.norm (p[:,:,:,:4] - y[:,:,:,:4],dim=-1) * ymask + mask_dist
+  dist = - dist * 10. # temperature hyperparameter
+  dist = dist.softmax(2)
+  
+  for i in range(4):
+    dist = dist / dist.sum(2, keepdim=True)
+    dist = dist / dist.sum(1, keepdim=True)
+
+  return dist
+  
+dist = dist_mat(p, y)
+plt.imshow(dist[0].detach())
+
+dist[0].sum(1).max()
+
+#%%
+res_edges = p.unsqueeze(2) # 200, 18, 1, 5
+res_edges = res_edges * dist.unsqueeze(3) # 200, 18, 18, 5
+res_edges = res_edges.sum(1)
+
+
+goal_edges = y.unsqueeze(1) # 200, 1, 18, 5
+goal_edges = goal_edges * dist.unsqueeze(3) # 200, 18, 18, 5
+goal_edges = goal_edges.sum(2)
+
+
+#%%
+
+pedges = p[0,:,:4].reshape(-1,2,2).detach()
+yedges = y[0,:,:4].reshape(-1,2,2)
+pmask = p[0,:,4]
+for edge in yedges: plt.plot(*edge.T, c='black')
+for edge,m in zip(pedges,pmask): plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
+
+goal_edges = goal_edges.detach()[0,:,:4].reshape(-1,2,2)
+for edge, gedge in zip(pedges, goal_edges):
+  plt.plot(*gedge.T, c='gray')
+  plt.plot([edge[0,0], gedge[0,0]], [edge[0,1], gedge[0,1]], c='gray')
+  plt.plot([edge[1,0], gedge[1,0]], [edge[1,1], gedge[1,1]], c='gray')
+
+
+res_mask = res_edges[0,:,4]
+res_edges = res_edges[0,:,:4].reshape(-1,2,2).detach()
+for edge, m, yedge in zip(res_edges, res_mask, yedges):
+  m = max(m,0.5)
+  # plt.plot(*edge.T, c=plt.colormaps['Grays'](m.item()))
+  # plt.plot([edge[0,0], yedge[0,0]], [edge[0,1], yedge[0,1]], c='gray')
+  # plt.plot([edge[1,0], yedge[1,0]], [edge[1,1], yedge[1,1]], c='gray')
