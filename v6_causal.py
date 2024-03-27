@@ -77,7 +77,7 @@ class Model(nn.Module):
     x = self.norm(x)
     for block in self.blocks: x = block(x)
     x = self.norm(x)
-    x = self.out(x).softmax(-1)
+    x = self.out(x)
     return x
 #%%
 net = Model().to(device, dtype).train()
@@ -111,7 +111,7 @@ for _ in range(10):
   print(l)
 
 #%%
-print("*"*20)
+print("******* TEST *******")
 x,y = gen_data(100)
 p = net(x)
 for i in range(4):
@@ -122,6 +122,7 @@ for i in range(4):
 
 #%%
 
+print ("******* INFERENCE ********")
 ww = 40
 
 def generate(n):
@@ -129,7 +130,8 @@ def generate(n):
   x = y[:1,0:ww]
   for i in range(n):
     p = net(x[:,-99:])
-    choice = p[0,-1,:].argmax()
+    choices = p[0,-1,:]
+    choice = torch.multinomial(choices.softmax(-1), 1)
     x = torch.cat([x, choice.reshape(1,1)], dim=1)
   return x, y
 
@@ -139,3 +141,4 @@ for i in range(5):
   plt.plot(p[0,:].cpu().numpy())
   plt.plot([ww,ww],[0,100])
   plt.show()
+
