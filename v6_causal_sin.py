@@ -1,4 +1,7 @@
 #%%
+# simplified version of the above code
+# simple autorergressive transformer
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +13,9 @@ import matplotlib.pyplot as plt
 dtype = torch.float32
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
 torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
 to_nearest_64 = lambda x: round(x/64) * 64
 model_scale = 1.
 max_seq_len = 100
@@ -44,7 +49,6 @@ class LatentAttentionBlock(nn.Module):
     self.position_bias_mult = nn.Parameter(torch.tensor(1.))
 
   def forward(self, x):
-    
     residual = x
     attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
     x = self.norm(x)
@@ -58,6 +62,7 @@ class LatentAttentionBlock(nn.Module):
    
 n_toks = 100
 
+ 
 #%%
 class Model(nn.Module):
   def __init__(self):
@@ -67,93 +72,72 @@ class Model(nn.Module):
     self.norm = nn.LayerNorm(residual_depth, bias=False)
     self.out = nn.Linear(residual_depth, n_toks, bias=False)
   
-  def forward(self, x:torch.Tensor):
+  def forward(self, x):
     x = self.emb(x)
     x = self.norm(x)
     for block in self.blocks: x = block(x)
     x = self.norm(x)
     x = self.out(x)
     return x
-
+#%%
 net = Model().to(device, dtype).train()
 opt = optim.Adam(net.parameters(), lr=3e-4)
-#%% gen data
-
-def random_shape():
-  n = np.random.randint(3, 10)
-  corners = []
-  for i in range(n):
-    angle = 2*np.pi*i/n + np.random.rand()*0.1
-    r = np.random.rand() * 0.5 + 0.5
-    corners.append(torch.tensor([np.cos(angle)*r, np.sin(angle)*r],dtype=torch.float32))
-  verts = []
-  corner_dir = np.random.randint(2)
-  for i in range(n + 1):
-    verts.append(corners[i % n])
-    verts.append(torch.tensor([corners[(i+corner_dir) % n][0] , corners[(i + 1 - corner_dir) % n][1]]))
-
-  verts = torch.stack(verts[:-1])
-  return verts
-
-max_points = 19
-
-def display(s):
-  s = s[:2 * max_points]
-  s = s.reshape(-1,2)
-  plt.plot(s[:,0].cpu().numpy(), s[:,1].cpu().numpy())
-
 
 def gen_data(n):
-  shapes = [random_shape() for _ in range(n)]
-  x = torch.stack([torch.cat([s, torch.zeros(max_points - len(s), 2)]) for s in shapes])
 
-  x = x.view(n, -1)
-  x = (x - x.min()) / (x.max() - x.min()) * (n_toks-1)
-  x = x.long()
-  pad = torch.zeros(n, 1).long()
-  y = x
-  x = torch.cat([pad, x], dim=1)[:, :-1]
-  return x, y
-
-x,y = gen_data(100)
-
-#%%
+  y = torch.arange(max_seq_len)
+  fs = (torch.randint(0,1000,(n,1))/1000)
+  y = torch.sin(y.reshape(1, -1) * fs + torch.randn(n,1) * 2)
+  y = (y - y.min()) / (y.max() - y.min()) * (n_toks-1)
+  y = torch.cat([torch.zeros(n,1),y], dim=1).long()
+  x = y[:, :-1]
+  y = y[:, 1:]
+  return x,y
 
 def step(x,y):
   opt.zero_grad()
   out = net(x)
-  loss = F.cross_entropy(out.reshape(-1, n_toks),y.flatten())
+  loss = F.cross_entropy(out[:,2:].reshape(-1, n_toks),y[:,2:].flatten())
   loss.backward()
   opt.step()
   return loss
 
 #%%
 epochs = 1000
-l = step(x,y)
-print(l.item())
 for _ in range(10):
   x,y = gen_data(100)
-  for _ in range(epochs // 20):
-    l = step(x,y)* 0.1 + l * 0.9
-  print(l.item())
+  for _ in range(epochs // 10):
+    l = step(x,y)
+  print(l)
+
+#%%
+print("******* TEST *******")
+x,y = gen_data(100)
+p = net(x)
+for i in range(4):
+  plt.plot(y[i,:].cpu().detach())
+  plt.plot(p[i,:].argmax(1).cpu().detach())
+  # plt.imshow
+  plt.show()
 
 #%%
 
 print ("******* INFERENCE ********")
+ww = 40
 
 def generate(n):
-  x = torch.zeros(1, 1).long()
+  x,y = gen_data(100)
+  x = y[:1,0:ww]
   for i in range(n):
     p = net(x[:,-99:])
     choices = p[0,-1,:]
     choice = torch.multinomial(choices.softmax(-1), 1)
     x = torch.cat([x, choice.reshape(1,1)], dim=1)
-    # if (x[:,-2:] == 49).all(): break
-  return x
+  return x, y
 
 for i in range(5):
-  p = generate(max_points*2)
+  p,y = generate(150)
+  plt.plot(y[0,:].cpu().numpy())
+  plt.plot(p[0,:].cpu().numpy())
+  plt.plot([ww,ww],[0,100])
   plt.show()
-  display(p[0,1:])
-
-# %%
