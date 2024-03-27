@@ -136,7 +136,7 @@ def generate(n):
   return x, y
 
 for i in range(5):
-  p,y = generate(50)
+  p,y = generate(150)
   plt.plot(y[0,:].cpu().numpy())
   plt.plot(p[0,:].cpu().numpy())
   plt.plot([ww,ww],[0,100])
