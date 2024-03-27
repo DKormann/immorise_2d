@@ -1,8 +1,8 @@
 # %%
 import numpy as np
 import torch 
+import time
 import matplotlib.pyplot as plt
-
 
 # %%
 class Mesh:
@@ -121,6 +121,8 @@ x, y = gen_data(200)
 model = Model(hidden_dim, nhead, inducing_points)
 print(model(x[:2]).shape)
 optimizer = Adam(model.parameters(), lr=0.0001)
+stepcount = 4000
+
 
 
 #%% helper funcs
@@ -155,11 +157,10 @@ def step(x,y):
   loss, reordered_y = loss_fn(p, y)
   loss.backward()
   optimizer.step()
-  print(f'\rloss:{loss.item()}',end='')
-  return p, reordered_y
+  return p, reordered_y, loss
 
-def display(p,x,y):
-  k = np.random.randint(0, len(x))
+def display(p,x,y,k=None):
+  if k == None:k = np.random.randint(0, len(x))
   p_edges = p[k].reshape(-1,5)[:,:4].reshape( 18, 2, 2)
   y_edges = y[k].reshape(-1,5)[:,:4].reshape( 18, 2, 2)
   pmask = p[k].reshape(-1,5)[:,4:].reshape( 18, 1)
@@ -173,90 +174,43 @@ def display(p,x,y):
   
   plt.scatter(*x[k].T, c='gray')
 
-p,newy=step(x,y)
+p,newy,loss=step(x,y)
 display(p.detach(),x,newy)
-
 #%%
+optimizer.param_groups[0]['lr'] = 0.00002
+model.load('v4_e55c.pth')
+stepcount = 4800
+#%%
+def timestring(d:int): return f'{d//3600}h {d%3600//60}m {d%60}s'
+
+epochs = 10_000
+_,_, loss = step(x,y)
+vol = 0
 try:
-  for i in range(1000):
+  st = time.time()
+  for i in range(stepcount, epochs):
     x, y = gen_data(200)
-    _,newy = step(x,y)
-    if i % 10 == 0: print(f'\nepoch {i}')
-except: pass
+    _,_,nl = step(x,y)
+    vol = vol*0.9 + (nl-loss)**2 *0.1
+    loss = loss*0.9 + nl*0.1
+    print(f'\r epoch {i}/{epochs} loss:{loss.item():.4} vol:{vol.item():.3} {timestring(int(time.time()-st))}    ',end='')
+    if i % 100 == 0: print('')
+    if (i+1) % 100 == 0: model.save(f"v4_e{i//100}c.pth")
+except KeyboardInterrupt: 
+  model.save(f"v4_e{i//1000}k_interrupt.pth")
+  pass
+
+
 
 #%%
-model.load('mab4model.pth')
-#%%
-
-with torch.no_grad(): p = model.train(False).forward(x)
-for _ in range(10):
-  loss, newy = loss_fn(p, y)
-  display(p,x,newy)
+p,newy,loss=step(x,y)
+for i in range(3):
+  display(p.detach(),x,newy)
   plt.show()
-
-#%%
-
-# %%
-
-p = p.detach()
-p.requires_grad = True
-
-#%%
-
-def dist_mat(p,y):
   
-  p = p.unsqueeze(2)
-  y = y.unsqueeze(1)
-  
-  pmask = p[:,:,:,4].repeat(1,1,18)
-  ymask = y[:,:,:,4].repeat(1,18,1)
-  mask_dist = torch.nn.functional.binary_cross_entropy(pmask, ymask,reduction='none')
-
-  dist = torch.norm (p[:,:,:,:4] - y[:,:,:,:4],dim=-1) * ymask + mask_dist
-  dist = - dist * 10. # temperature hyperparameter
-  dist = dist.softmax(2)
-  
-  for i in range(4):
-    dist = dist / dist.sum(2, keepdim=True)
-    dist = dist / dist.sum(1, keepdim=True)
-
-  return dist
-  
-dist = dist_mat(p, y)
-plt.imshow(dist[0].detach())
-
-dist[0].sum(1).max()
-
 #%%
-res_edges = p.unsqueeze(2) # 200, 18, 1, 5
-res_edges = res_edges * dist.unsqueeze(3) # 200, 18, 18, 5
-res_edges = res_edges.sum(1)
+p_edges = p[0].reshape(-1,5)[:,:4].reshape( 18, 2, 2).detach()
+p_mask = p[0].reshape(-1,5)[:,4:].reshape( 18, 1).detach()
+for edge, m in zip(p_edges,p_mask): plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
 
-
-goal_edges = y.unsqueeze(1) # 200, 1, 18, 5
-goal_edges = goal_edges * dist.unsqueeze(3) # 200, 18, 18, 5
-goal_edges = goal_edges.sum(2)
-
-
-#%%
-
-pedges = p[0,:,:4].reshape(-1,2,2).detach()
-yedges = y[0,:,:4].reshape(-1,2,2)
-pmask = p[0,:,4]
-for edge in yedges: plt.plot(*edge.T, c='black')
-for edge,m in zip(pedges,pmask): plt.plot(*edge.T, c=plt.colormaps['Blues'](m.item()))
-
-goal_edges = goal_edges.detach()[0,:,:4].reshape(-1,2,2)
-for edge, gedge in zip(pedges, goal_edges):
-  plt.plot(*gedge.T, c='gray')
-  plt.plot([edge[0,0], gedge[0,0]], [edge[0,1], gedge[0,1]], c='gray')
-  plt.plot([edge[1,0], gedge[1,0]], [edge[1,1], gedge[1,1]], c='gray')
-
-
-res_mask = res_edges[0,:,4]
-res_edges = res_edges[0,:,:4].reshape(-1,2,2).detach()
-for edge, m, yedge in zip(res_edges, res_mask, yedges):
-  m = max(m,0.5)
-  # plt.plot(*edge.T, c=plt.colormaps['Grays'](m.item()))
-  # plt.plot([edge[0,0], yedge[0,0]], [edge[0,1], yedge[0,1]], c='gray')
-  # plt.plot([edge[1,0], yedge[1,0]], [edge[1,1], yedge[1,1]], c='gray')
+plt.scatter(*x[0].T, c='gray')
