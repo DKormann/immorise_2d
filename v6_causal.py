@@ -8,9 +8,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 dtype = torch.float32
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch.cuda.is_available():
+  device = torch.device('cuda')
+  torch.set_default_tensor_type(torch.cuda.FloatTensor)
+else:
+  device = torch.device("mps")
+  torch.set_default_tensor_type(torch.FloatTensor)
 
-torch.set_default_tensor_type(torch.cuda.FloatTensor)
 to_nearest_64 = lambda x: round(x/64) * 64
 model_scale = 1.
 max_seq_len = 100
@@ -33,7 +37,6 @@ class LatentAttentionBlock(nn.Module):
   """ Efficient fused latent-space attention block. Linear keys and queries, nonlinear values."""
   def __init__(self, num_dim):
     super().__init__()
-
     self.dim        = num_dim
     self.qk_dim     = self.dim//qk_dim_div
     self.v_dim      = num_dim
@@ -135,15 +138,9 @@ def pointcloud(verts,n ):
   return points +torch.randn(n, 2) * 0.01
   
 #%%
-
-max_points = 19
-
-def display(s):
-  s = s[:2 * max_points]
-  s = s.reshape(-1,2)
-  while (s[-1]==49).sum() == 2: s = s[:-1]
-  plt.plot(s[:,0].cpu().numpy(), s[:,1].cpu().numpy())
-
+net = Model().to(device).train()
+opt = optim.Adam(net.parameters(), lr=3e-4)
+#%%
 def gen_data(n):
   shapes = [random_shape() for _ in range(n)]
   pts = torch.stack([pointcloud(s, 100) for s in shapes])
@@ -159,8 +156,16 @@ def gen_data(n):
   x = torch.cat([pad, x], dim=1)[:, :-1]
   return x, y, pts
 
-#%%
-def step(x,y,pts):
+  y = torch.arange(max_seq_len)
+  fs = (torch.randint(0,1000,(n,1))/1000)
+  y = torch.sin(y.reshape(1, -1) * fs + torch.randn(n,1) * 2)
+  y = (y - y.min()) / (y.max() - y.min()) * (n_toks-1)
+  y = torch.cat([torch.zeros(n,1),y], dim=1).long()
+  x = y[:, :-1]
+  y = y[:, 1:]
+  return x.to(device) ,y.to(device)
+
+def step(x,y):
   opt.zero_grad()
   out = net(x,pts)
   loss = F.cross_entropy(out.reshape(-1, n_toks),y.flatten())
@@ -169,6 +174,12 @@ def step(x,y,pts):
   return loss
 
 #%%
+epochs = 10
+for _ in range(10):
+  x,y = gen_data(100)
+  for _ in range(epochs // 10):
+    l = step(x,y)
+  print(l)
 
 from torch.optim.lr_scheduler import StepLR
 
