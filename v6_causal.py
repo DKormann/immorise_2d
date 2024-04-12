@@ -172,18 +172,20 @@ train_data = cycle([gen_data(100) for _ in range(100)])
 
 #%%
 net = Model().to(device, dtype).train()
-opt = optim.Adam(net.parameters(), lr=3e-4)
+opt = optim.Adam(net.parameters(), lr=1e-3)
 
-epochs = 5_000
+epochs = 1000
 
-scheduler = StepLR(opt, step_size=epochs//40, gamma=0.8)
+scheduler = StepLR(opt,10, gamma=0.95)
+
 for e in range(epochs):
   x, y, pts = next(train_data)
   try: loss = step(x, y, pts)
   except KeyboardInterrupt:break
   print(f"\r{e+1}/{epochs}: ",loss.item(), end="")
-  if (e+1) % (epochs // 40) == 0: print()
+  if (e) % (epochs // 10) == 0: print()
   scheduler.step()
+
 
 #%%
 
