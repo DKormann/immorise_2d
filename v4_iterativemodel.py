@@ -4,6 +4,8 @@ import torch
 import time
 import matplotlib.pyplot as plt
 
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # %%
 class Mesh:
   def __init__(self, edges: torch.Tensor):
@@ -64,7 +66,7 @@ def gen_data(n):
   assert maxverts == 18 
   y = [torch.cat([y.reshape(-1,4), torch.ones(len(y), 1)], dim=1) for y in y]
   y = torch.stack([torch.cat([y, torch.zeros(maxverts - len(y), 5)]) for y in y])
-  return x, y
+  return x.to(device), y.to(device)
 #%%
 
 from torch.nn import TransformerEncoderLayer, Linear, Sequential
@@ -118,10 +120,10 @@ class Model(torch.nn.Module):
 
 
 x, y = gen_data(200)
-model = Model(hidden_dim, nhead, inducing_points)
+model = Model(hidden_dim, nhead, inducing_points).to(device)
 print(model(x[:2]).shape)
 optimizer = Adam(model.parameters(), lr=0.0001)
-stepcount = 4000
+stepcount = 0
 
 
 
@@ -175,7 +177,7 @@ def display(p,x,y,k=None):
   plt.scatter(*x[k].T, c='gray')
 
 p,newy,loss=step(x,y)
-display(p.detach(),x,newy)
+display(p.detach().cpu(),x.cpu(),newy.cpu())
 #%%
 optimizer.param_groups[0]['lr'] = 0.00002
 model.load('v4_e55c.pth')
@@ -195,7 +197,6 @@ try:
     loss = loss*0.9 + nl*0.1
     print(f'\r epoch {i}/{epochs} loss:{loss.item():.4} vol:{vol.item():.3} {timestring(int(time.time()-st))}    ',end='')
     if i % 100 == 0: print('')
-    if (i+1) % 100 == 0: model.save(f"v4_e{i//100}c.pth")
 except KeyboardInterrupt: 
   model.save(f"v4_e{i//1000}k_interrupt.pth")
   pass
