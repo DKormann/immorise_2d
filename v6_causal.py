@@ -89,7 +89,6 @@ class LatentCrossAttentionBlock(nn.Module):
     out = F.linear(torch.cat([geglu_local, attention], dim=-1), self.project)
     return residual + out    
 
-
 class Model(nn.Module):
   def __init__(self):
     super().__init__()
@@ -116,6 +115,7 @@ class Model(nn.Module):
 
 def random_shape():
   n = np.random.randint(3, 10)
+  n = 10
   corners = []
   for i in range(n):
     angle = 2*np.pi*i/n + np.random.rand()*0.1
@@ -136,11 +136,9 @@ def pointcloud(verts,n ):
   rand_edges = edges[torch.multinomial(edge_lens / edge_lens.max(), n, replacement=True)]
   points = rand_edges[:, :2] + torch.rand((n,1)).reshape(-1,1) * (rand_edges[:, 2:] - rand_edges[:, :2])
   return points +torch.randn(n, 2) * 0.01
-  
+
 #%%
-net = Model().to(device).train()
-opt = optim.Adam(net.parameters(), lr=3e-4)
-#%%
+max_points = 21
 def gen_data(n):
   shapes = [random_shape() for _ in range(n)]
   pts = torch.stack([pointcloud(s, 100) for s in shapes])
@@ -156,16 +154,8 @@ def gen_data(n):
   x = torch.cat([pad, x], dim=1)[:, :-1]
   return x, y, pts
 
-  y = torch.arange(max_seq_len)
-  fs = (torch.randint(0,1000,(n,1))/1000)
-  y = torch.sin(y.reshape(1, -1) * fs + torch.randn(n,1) * 2)
-  y = (y - y.min()) / (y.max() - y.min()) * (n_toks-1)
-  y = torch.cat([torch.zeros(n,1),y], dim=1).long()
-  x = y[:, :-1]
-  y = y[:, 1:]
-  return x.to(device) ,y.to(device)
 
-def step(x,y):
+def step(x,y,pts):
   opt.zero_grad()
   out = net(x,pts)
   loss = F.cross_entropy(out.reshape(-1, n_toks),y.flatten())
@@ -173,27 +163,26 @@ def step(x,y):
   opt.step()
   return loss
 
-#%%
-epochs = 10
-for _ in range(10):
-  x,y = gen_data(100)
-  for _ in range(epochs // 10):
-    l = step(x,y)
-  print(l)
-
 from torch.optim.lr_scheduler import StepLR
 
+#%%
+
+from itertools import cycle
+train_data = cycle([gen_data(100) for _ in range(100)])
+
+#%%
 net = Model().to(device, dtype).train()
 opt = optim.Adam(net.parameters(), lr=3e-4)
 
 epochs = 5_000
-opt.param_groups[0]['lr'] = 3e-4
 
-scheduler = StepLR(opt, step_size=epochs//40, gamma=0.9)
+scheduler = StepLR(opt, step_size=epochs//40, gamma=0.8)
 for e in range(epochs):
-  if e % 10 == 0: x, y, pts = gen_data(100)
-  loss = step(x, y, pts)
-  if e % (epochs // 40) == 0: print(loss.item(), flush=True)
+  x, y, pts = next(train_data)
+  try: loss = step(x, y, pts)
+  except KeyboardInterrupt:break
+  print(f"\r{e+1}/{epochs}: ",loss.item(), end="")
+  if (e+1) % (epochs // 40) == 0: print()
   scheduler.step()
 
 #%%
@@ -214,7 +203,7 @@ def generate(n):
 for i in range(5):
   p,pts = generate(max_points*2)
   plt.scatter(pts[0,:,0].cpu().numpy(), pts[0,:,1].cpu().numpy())
-  display(p[0,1:])
+  plt.plot(*p[0,1:].reshape(-1,2).T.cpu())
   plt.show()
   
 

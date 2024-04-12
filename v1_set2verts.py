@@ -4,6 +4,8 @@ import numpy as np
 import torch 
 import matplotlib.pyplot as plt
 
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # %%
 class Shape:
   def __init__(self, vertices: torch.Tensor):
@@ -15,7 +17,7 @@ class Shape:
     return edges
   
   def plot(self, c='b'):
-    for edge in self.loop:plt.plot(edge[:,0], edge[:,1],c=c)
+    for edge in self.loop.cpu():plt.plot(edge[:,0], edge[:,1],c=c)
     
   def pointcloud(self,n=1000,std = 0.01):
     edge_lens = torch.norm(self.vertices[:-1] - self.vertices[1:], dim=1)
@@ -52,7 +54,7 @@ def random_shape():
 shape = random_shape()
 shape.plot()
 v = shape.pointcloud(200)
-plt.scatter(*v.T)
+plt.scatter(*v.cpu().T)
 
 # %%
 def gen_data(t,e):
@@ -114,10 +116,10 @@ def display(p,x,y):
   t_shape = Shape(y[k].reshape( 19, 2))
   t_shape.plot('black')
   p_shape.plot('blue')
-  plt.scatter(*x[k].T, c='gray')
+  plt.scatter(*x[k].cpu().T, c='gray')
 #%%
 
-for i in range(50):
+for i in range(100):
   print(f'Run {i}')
   train_x, train_y, test_x, test_y = gen_data(180,20)
   model.train()

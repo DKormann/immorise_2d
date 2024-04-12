@@ -6,9 +6,7 @@ from torch.nn import functional as F
 
 import matplotlib.pyplot as plt
 
-
 max_seq_len = 100
-
 dim = 512
 hidden_dim = 2048
 

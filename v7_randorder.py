@@ -138,7 +138,7 @@ def train_step():
 
 #%%
 
-opt.param_groups[0]['lr'] = 1e-4
+opt.param_groups[0]['lr'] = 1e-3
 epochs = 10_000
 for e in range(epochs):
   try:loss = train_step()
@@ -148,6 +148,9 @@ for e in range(epochs):
   if (e+1) % (epochs//10)==0: print("")
 
 #%%
+print ("******* INFERENCE ********")
+
+
 
 x,y = gen_data(1)
 y_pred = model(x).cpu()[0].detach()
