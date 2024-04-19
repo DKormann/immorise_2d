@@ -20,6 +20,8 @@ else:
   device = torch.device("mps")
   torch.set_default_device(device)
 
+dtype = torch.float32
+
 
 to_nearest_64 = lambda x: round(x/64) * 64
 model_scale = 1.
@@ -35,17 +37,12 @@ n_toks = 100
 
 with torch.no_grad():
   bias_range = torch.arange(-max_seq_len+1, 1).to(device, dtype)
-  # position_bias_base = bias_range.unsqueeze(0) - bias_range.unsqueeze(1)
-  # negative_infinity_matrix_base = torch.empty_like(position_bias_base).fill_(-float("inf"))
   negative_infinity_matrix_base = torch.empty((max_seq_len, max_seq_len), device=device, dtype=dtype).fill_(-float("inf"))
   causal_mask = torch.tril(torch.ones((max_seq_len, max_seq_len), device=device, dtype=torch.bool))
   causal_mask = torch.where(causal_mask, torch.tensor(0.), torch.tensor(-float('inf')))
-  # inner point attn
   causal_mask[1::2] += torch.eye(max_seq_len,max_seq_len+1, device=device, dtype=torch.float)[1::2,1:]
-causal_mask[:10, :10]
-
-#%%
-torch.cuda.FloatTensor
+  position_bias_base = torch.zeros_like(causal_mask)
+  position_bias_base[1::2] += torch.eye(max_seq_len,max_seq_len+1, device=device, dtype=torch.float)[1::2,1:]
 
 #%%
 class LatentAttentionBlock(nn.Module):
@@ -56,18 +53,16 @@ class LatentAttentionBlock(nn.Module):
     self.qk_dim     = self.dim//qk_dim_div
     self.v_dim      = num_dim
     self.expand_dim = num_dim * expand_factor
-    
 
     self.norm       = nn.LayerNorm(self.dim, bias=False)
     self.expand     = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(2*self.qk_dim+2*self.expand_dim, self.dim))
     self.project    = nn.Parameter(1. * 1./residual_depth**.5 * 1./expand_factor * 1./num_blocks * torch.randn((self.dim, self.expand_dim),dtype=dtype))
-    # self.position_bias_mult = nn.Parameter(torch.tensor(1.))
+    self.position_bias_mult = nn.Parameter(torch.tensor(1.))
 
   def forward(self, x):
-  
     residual = x
-    # attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
-    attn_mask = causal_mask[:x.shape[1], :x.shape[1]]
+    attn_mask = causal_mask[:x.shape[1], :x.shape[1]] #+ position_bias_base[:x.shape[1], :x.shape[1]] 
+
     x = self.norm(x)
     query, key, linear, pre_gelu = F.linear(x, self.expand).split((self.qk_dim, self.qk_dim, self.expand_dim, self.expand_dim), dim=-1)
     geglu = linear * F.gelu(pre_gelu)
@@ -137,26 +132,24 @@ def step(x,y,pts):
   return loss
 
 #%%
-train_data = cycle([gen_data(100, randorder=True) for _ in range(1000)])
+train_data = cycle([gen_data(100, randorder=False) for _ in range(100)])
 
-#%%
 net = Model().to(device, dtype).train()
 opt = optim.Adam(net.parameters(), lr=1e-4)
 
 epochs = 1000
-
 scheduler = StepLR(opt,10, gamma=0.99)
-#%%
-opt.param_groups[0]['lr'] = 1e-5
+# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs, eta_min=1e-5)
+# scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=epochs, pct_start=0.1)
+scheduler = torch.optim.lr_scheduler.CyclicLR(opt, base_lr=1e-5, max_lr=1e-3, step_size_up=epochs//10, cycle_momentum=False)
+
 for e in range(epochs):
   x, y, pts = next(train_data)
   try: loss = step(x, y, pts).item()
   except KeyboardInterrupt:break
   print(f"\r{e+1}/{epochs}: ",loss, end="")
-  if (e) % (epochs // 10) == 0: print()
-  # scheduler.step()
-
-#%%
+  if (e+1) % (epochs // 10) == 0: print()
+  scheduler.step()
 
 print ("******* INFERENCE ********")
 
@@ -174,5 +167,7 @@ def generate(n):
 for i in range(5):
   p,pts = generate(max_points*2)
   plt.scatter(pts[0,:,0].cpu().numpy(), pts[0,:,1].cpu().numpy())
-  plt.scatter(*p[0,1:].reshape(-1,2).T.cpu())
+  plt.plot(*p[0,1:].reshape(-1,2).T.cpu())
   plt.show()
+
+# %%

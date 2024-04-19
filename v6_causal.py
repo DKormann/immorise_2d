@@ -7,13 +7,16 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
+from itertools import cycle
+
 dtype = torch.float32
 if torch.cuda.is_available():
   device = torch.device('cuda')
-  torch.set_default_tensor_type(torch.cuda.FloatTensor)
+  torch.set_default_device(device)
 else:
   device = torch.device("mps")
-  torch.set_default_tensor_type(torch.FloatTensor)
+  torch.set_default_device(device)
+
 
 to_nearest_64 = lambda x: round(x/64) * 64
 model_scale = 1.
@@ -120,32 +123,44 @@ def step(x,y,pts):
   opt.step()
   return loss
 
+def test():
+  global test_data
+  # for x, y, pts in val_data:
+  #   with torch.no_grad():
+  #     p = net(x,pts)
+  #     err += F.cross_entropy(p.view(-1, n_toks), y.view(-1)).item()
+  errs = [F.cross_entropy(net(x,pts).view(-1, n_toks), y.view(-1)).item() for x,y,pts in test_data]
+  return sum(errs) / len(errs)
+
 from torch.optim.lr_scheduler import StepLR
 
 #%%
 
 from utils.data import gen_data, display, max_points
 #%%
-x,y,pts = gen_data(1)
-pts
+batchsize = 100 
+n_batches = 100
+test_data = [gen_data(batchsize) for _ in range(n_batches)]
 #%%
-from itertools import cycle
-train_data = cycle([gen_data(100) for _ in range(100)])
-
+train_data = cycle([gen_data(batchsize) for _ in range(n_batches)])
 #%%
 net = Model().to(device, dtype).train()
 opt = optim.Adam(net.parameters(), lr=1e-3)
 
 epochs = 1000
 
-scheduler = StepLR(opt,10, gamma=0.95)
 #%%
+opt = optim.Adam(net.parameters(), lr=1e-4)
+scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=epochs, pct_start=0.1)
+
 for e in range(epochs):
   x, y, pts = next(train_data)
   try: loss = step(x, y, pts)
   except KeyboardInterrupt:break
   print(f"\r{e+1}/{epochs}: ",loss.item(), end="")
-  if (e) % (epochs // 10) == 0: print()
+  if (e+1) % (epochs // 10) == 0: 
+    print(" val loss:", test())
+
   scheduler.step()
 
 
