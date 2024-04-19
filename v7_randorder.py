@@ -7,12 +7,13 @@ import matplotlib.pyplot as plt
 from torch import nn
 
 dtype = torch.float32
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-torch.set_default_tensor_type(torch.cuda.FloatTensor)
+torch.set_default_tensor_type(torch.FloatTensor)
 to_nearest_64 = lambda x: round(x/64) * 64
 model_scale = 1.
-max_seq_len = 20
+max_seq_len = 42
 
 qk_dim_div = 8
 expand_factor = 2
@@ -92,69 +93,65 @@ class Model(nn.Module):
   def __init__(self):
     super().__init__()
     self.emb = torch.nn.Embedding(ntoks, residual_depth)
+    self.enc = nn.Linear(2, residual_depth)
     self.layers = torch.nn.ModuleList([LatentAttentionBlock(residual_depth) for _ in range(num_blocks)])
+    self.cross_layers = torch.nn.ModuleList([LatentCrossAttentionBlock(residual_depth) for _ in range(num_blocks)])
     self.out = nn.Linear(residual_depth, ntoks)
-  def forward(self, x):
+  def forward(self, x, pts):
     x = self.emb(x)
-    for layer in self.layers:
+    # pts = self.enc(pts)
+    for layer,cross_layer in zip(self.layers, self.cross_layers):
       x = layer(x)
+      # x = cross_layer(x, pts)
     return self.out(x)
-
-
-def gen_data(n):
-  def gen_sample():
-    x = torch.randint(0, ntoks, (int(max_seq_len/2),))
-    x_ = x[torch.randperm(x.shape[0])]
-    # x_ = x
-    return torch.cat([x, x_])
-  x = torch.stack([gen_sample() for _ in range(n)])
-  # y = torch.cat([torch.zeros(n, int(max_seq_len/2), dtype=torch.int64), x[:, int(max_seq_len/2):]], dim=1)
-  y= x
-  x = torch.cat([torch.zeros(n,1, dtype=torch.int64),x[:,:-1]], dim=1)
-  return x ,y
-
-x,y = gen_data(10)
-x.shape, y.shape
-
-plt.imshow(x.detach().cpu())
-plt.show()
-plt.imshow(y.detach().cpu())
-# %%
 
 model = Model()
 opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 #%%
+from utils.data import gen_data, display
 
-def train_step():
-  x,y = gen_data(100)
+
+def step(x,y,z):
+  p = model(x,z)
   opt.zero_grad()
-  y_pred = model(x)
-  
-  loss = F.cross_entropy( y_pred[:,max_seq_len//2:].reshape(-1, ntoks),y[:,max_seq_len//2:].reshape(-1))
-  loss.backward()
+  l = F.cross_entropy(p.view(-1, ntoks), y.view(-1))
+  l.backward()
   opt.step()
-  return loss.item()
+  return l.item()
+  
+# x,y,z = gen_data(1,randorder=True)
 
-#%%
+opt.param_groups[0]['lr'] = 1e-4
 
-opt.param_groups[0]['lr'] = 1e-3
 epochs = 10_000
-for e in range(epochs):
-  try:loss = train_step()
-  except KeyboardInterrupt: break
-    
-  print(f"\rEpoch {e+1}/{epochs} Loss: {loss}", end="")
-  if (e+1) % (epochs//10)==0: print("")
+loss = 1.
+for i in range(epochs):
+  if (i) % 100 == 0: print()
+  if i%10==0: x,y,z = gen_data(100, randorder=True)
 
+  try: loss = step(x,y,z)
+  except KeyboardInterrupt:break
+  print(f'\rEpoch {i}/{epochs} Loss: {loss}', end='')
+# %%
+
+print ("******* Inference ********")
+_,_,z = gen_data(1,randorder = True)
+
+x = torch.zeros(1, 1).long()
+
+for i in range(max_seq_len):
+  p = model(x,z)
+  choice = p[:,-1].argmax(-1).unsqueeze(1)
+  x = torch.cat((x, choice), dim=1)
+
+shape = x[0,1:].detach()
+shape = shape.where(shape != 0, torch.tensor(np.nan)).cpu()
+plt.scatter(shape[::2], shape[1::2])
+# plt.scatter(*z.cpu()[0].T*50 + 50)
+shape.reshape(-1,2)
+# %%
+x,y,z = gen_data(100, randorder=True)
 #%%
-print ("******* INFERENCE ********")
-
-
-
-x,y = gen_data(1)
-y_pred = model(x).cpu()[0].detach()
-
-plt.imshow(y_pred)
-# plt.plot(y.cpu()[0])
-
+plt.scatter(y[0,::2].cpu(), y[0,1::2].cpu())
+plt.scatter(*z.cpu()[0].T*50 + 50)

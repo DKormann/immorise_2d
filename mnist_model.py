@@ -1,8 +1,10 @@
 #%%
 import torch 
-from torchvision import datasets, transforms
+from torchvision import datasets
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+
+from trainplot import TrainPlot
 
 # Download and load the MNIST training dataset
 train_dataset = datasets.MNIST(root='./data', train=True, download=True)
