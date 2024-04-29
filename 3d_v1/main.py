@@ -22,7 +22,6 @@ for i, batch in enumerate(train_batches):
   maxl = max([len(floor) for floor in batch])
   batch = torch.stack([F.pad(floor, (0,0,0,0,0,maxl-len(floor))) for floor in batch])
   train_batches[i] = batch.view(*batch.shape[:-3], -1)
-  
 
 #%%
 model_scale = 1.
@@ -42,6 +41,24 @@ class Model(nn.Module):
     return self.out(x)
 
 net = Model()
+opt = torch.optim.Adam(net.parameters(), lr=1e-3)
 
 p = net(train_batches[0])
 p.shape
+
+#%%
+
+#train 
+
+def step(batch):
+  y = batch
+  x = F.pad(y[:,:-1], (1,0,0,0))
+  p = net(x)
+  loss = F.cross_entropy(p.view(-1,100), y.view(-1))
+  opt.zero_grad()
+  loss.backward()
+  opt.step()
+  return loss.item()
+#%%
+
+step(train_batches[0])
