@@ -26,8 +26,8 @@ class LatentAttentionBlock(nn.Module):
     
     with torch.no_grad():
       bias_range = torch.arange(-max_seq_len+1, 1).to(device, dtype)
-      position_bias_base = bias_range.unsqueeze(0) - bias_range.unsqueeze(1)
-      self.negative_infinity_matrix_base = torch.empty_like(position_bias_base).fill_(-float("inf"))
+      self.position_bias_base = bias_range.unsqueeze(0) - bias_range.unsqueeze(1)
+      self.negative_infinity_matrix_base = torch.empty_like(self.position_bias_base).fill_(-float("inf"))
       self.causal_mask = torch.tril(torch.ones((max_seq_len, max_seq_len), device=device, dtype=torch.bool))
 
     self.dim        = num_dim
@@ -53,33 +53,38 @@ class LatentAttentionBlock(nn.Module):
     x = residual + out
     return x
   
-# class LatentCrossAttentionBlock(nn.Module):
-#   def __init__ (self, num_dim):
-#     super().__init__()
+class LatentCrossAttentionBlock(nn.Module):
+  def __init__ (self, num_dim, model_scale = 1., max_seq_len = 100):
+    super().__init__()
     
-#     self.dim        = num_dim
-#     self.qk_dim     = self.dim//qk_dim_div
-#     self.v_dim      = num_dim
-#     self.expand_dim = num_dim * expand_factor
-#     self.local_dim  = self.expand_dim - self.v_dim
+    qk_dim_div = 8
+    expand_factor = 2
+    residual_depth = to_nearest_64(384 * math.log2(1.+model_scale))
+    num_blocks = round(8 * math.log2(1.+model_scale))
     
-#     self.norm       = nn.LayerNorm(self.dim, bias=False)
-#     self.Wq         = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.local_dim, self.dim))
-#     self.Wkv        = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.v_dim, self.dim))
+    self.dim        = num_dim
+    self.qk_dim     = self.dim//qk_dim_div
+    self.v_dim      = num_dim
+    self.expand_dim = num_dim * expand_factor
+    self.local_dim  = self.expand_dim - self.v_dim
     
-#     self.project    = nn.Parameter(1. * 1./residual_depth**.5 * 1./expand_factor * 1./num_blocks * torch.randn((self.dim, self.expand_dim),dtype=dtype))
+    self.norm       = nn.LayerNorm(self.dim, bias=False)
+    self.Wq         = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.local_dim, self.dim))
+    self.Wkv        = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.v_dim, self.dim))
+    
+    self.project    = nn.Parameter(1. * 1./residual_depth**.5 * 1./expand_factor * 1./num_blocks * torch.randn((self.dim, self.expand_dim),dtype=dtype))
 
-#   def forward(self, q, kv):
-#     residual = q
-#     q = self.norm(q)
-#     query, lin_local, pre_geglu_local = F.linear(q, self.Wq).split((self.qk_dim, self.local_dim, self.local_dim), dim=-1)
-#     geglu_local = lin_local * F.gelu(pre_geglu_local)
-#     key, lin_value, pre_geglu_value = F.linear(kv, self.Wkv).split((self.qk_dim, self.v_dim, self.v_dim), dim=-1)
-#     geglu_value = lin_value * F.gelu(pre_geglu_value)
-#     attention = F.scaled_dot_product_attention(query, key, geglu_value)
+  def forward(self, q, kv):
+    residual = q
+    q = self.norm(q)
+    query, lin_local, pre_geglu_local = F.linear(q, self.Wq).split((self.qk_dim, self.local_dim, self.local_dim), dim=-1)
+    geglu_local = lin_local * F.gelu(pre_geglu_local)
+    key, lin_value, pre_geglu_value = F.linear(kv, self.Wkv).split((self.qk_dim, self.v_dim, self.v_dim), dim=-1)
+    geglu_value = lin_value * F.gelu(pre_geglu_value)
+    attention = F.scaled_dot_product_attention(query, key, geglu_value)
 
-#     out = F.linear(torch.cat([geglu_local, attention], dim=-1), self.project)
-#     return residual + out    
+    out = F.linear(torch.cat([geglu_local, attention], dim=-1), self.project)
+    return residual + out    
 
 class Model(nn.Module):
   def __init__(self, model_scale=1., n_toks=100):
