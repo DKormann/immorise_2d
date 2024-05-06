@@ -5,3 +5,4 @@ numpy==1.26.4
 open3d==0.18.0
 scikit_learn==1.4.2
 torch==2.3.0
+nbstripout==0.7.1
