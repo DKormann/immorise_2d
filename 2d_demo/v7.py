@@ -1,26 +1,21 @@
-
 #%%
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
-
 import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils.data import gen_data, display, max_points
 from itertools import cycle
 
+dtype = torch.float32
 if torch.cuda.is_available():
   device = torch.device('cuda')
   torch.set_default_device(device)
 else:
   device = torch.device("mps")
   torch.set_default_device(device)
-
-dtype = torch.float32
 
 
 to_nearest_64 = lambda x: round(x/64) * 64
@@ -37,13 +32,9 @@ n_toks = 100
 
 with torch.no_grad():
   bias_range = torch.arange(-max_seq_len+1, 1).to(device, dtype)
-  negative_infinity_matrix_base = torch.empty((max_seq_len, max_seq_len), device=device, dtype=dtype).fill_(-float("inf"))
+  position_bias_base = bias_range.unsqueeze(0) - bias_range.unsqueeze(1)
+  negative_infinity_matrix_base = torch.empty_like(position_bias_base).fill_(-float("inf"))
   causal_mask = torch.tril(torch.ones((max_seq_len, max_seq_len), device=device, dtype=torch.bool))
-  causal_mask = torch.where(causal_mask, torch.tensor(0.), torch.tensor(-float('inf')))
-  causal_mask[1::2] += torch.eye(max_seq_len,max_seq_len+1, device=device, dtype=torch.float)[1::2,1:]
-  position_bias_base = torch.zeros_like(causal_mask)
-  position_bias_base[1::2] += torch.eye(max_seq_len,max_seq_len+1, device=device, dtype=torch.float)[1::2,1:]
-
 #%%
 class LatentAttentionBlock(nn.Module):
   """ Efficient fused latent-space attention block. Linear keys and queries, nonlinear values."""
@@ -53,16 +44,17 @@ class LatentAttentionBlock(nn.Module):
     self.qk_dim     = self.dim//qk_dim_div
     self.v_dim      = num_dim
     self.expand_dim = num_dim * expand_factor
+    
 
-    self.norm       = nn.LayerNorm(self.dim, bias=False)
+    self.norm       = nn.LayerNorm(self.dim)
     self.expand     = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(2*self.qk_dim+2*self.expand_dim, self.dim))
     self.project    = nn.Parameter(1. * 1./residual_depth**.5 * 1./expand_factor * 1./num_blocks * torch.randn((self.dim, self.expand_dim),dtype=dtype))
     self.position_bias_mult = nn.Parameter(torch.tensor(1.))
 
   def forward(self, x):
+  
     residual = x
-    attn_mask = causal_mask[:x.shape[1], :x.shape[1]] #+ position_bias_base[:x.shape[1], :x.shape[1]] 
-
+    attn_mask = torch.where(causal_mask[:x.shape[1], :x.shape[1]], F.softplus(self.position_bias_mult) * position_bias_base[:x.shape[1], :x.shape[1]], negative_infinity_matrix_base[:x.shape[1], :x.shape[1]])
     x = self.norm(x)
     query, key, linear, pre_gelu = F.linear(x, self.expand).split((self.qk_dim, self.qk_dim, self.expand_dim, self.expand_dim), dim=-1)
     geglu = linear * F.gelu(pre_gelu)
@@ -82,7 +74,7 @@ class LatentCrossAttentionBlock(nn.Module):
     self.expand_dim = num_dim * expand_factor
     self.local_dim  = self.expand_dim - self.v_dim
     
-    self.norm       = nn.LayerNorm(self.dim, bias=False)
+    self.norm       = nn.LayerNorm(self.dim)
     self.Wq         = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.local_dim, self.dim))
     self.Wkv        = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.v_dim, self.dim))
     
@@ -100,19 +92,32 @@ class LatentCrossAttentionBlock(nn.Module):
     out = F.linear(torch.cat([geglu_local, attention], dim=-1), self.project)
     return residual + out    
 
+class Xencoding(nn.Module):
+  def __init__(self, dim):
+    super().__init__()
+    self.enc = nn.Parameter(torch.randn(dim*2,2)* 1./dim**.5)
+    self.enc2 = nn.Parameter(torch.randn(dim,dim*2)* 1./dim**.5)
+  def forward(self, x):
+    x = F.linear(x, self.enc)
+    x = F.gelu(x)
+    return F.linear(x, self.enc2)
+    
+
 class Model(nn.Module):
   def __init__(self):
     super().__init__()
     self.emb = nn.Embedding(n_toks, residual_depth, scale_grad_by_freq=True)
-    self.pt_emb = nn.Embedding(n_toks, residual_depth//2, scale_grad_by_freq=True)
+    # self.pt_emb = nn.Embedding(n_toks, residual_depth//2, scale_grad_by_freq=True)
+    self.pt_enc = Xencoding(residual_depth//2)
     self.blocks = nn.ModuleList([LatentAttentionBlock(residual_depth) for _ in range(num_blocks)])
     self.blocks2 = nn.ModuleList([LatentCrossAttentionBlock(residual_depth) for _ in range(num_blocks)])
-    self.norm = nn.LayerNorm(residual_depth, bias=False)
+    self.norm = nn.LayerNorm(residual_depth)
     self.out = nn.Linear(residual_depth, n_toks, bias=False)
   
   def forward(self, q:torch.Tensor, pts:torch.Tensor):
     q = self.emb(q)
-    kv = self.pt_emb(pts) # B, 100, 2, D / 2
+    # kv = self.pt_emb(pts) # B, 100, 2, D / 2
+    kv = self.pt_enc(pts) # B, 100, 2, D / 2
     kv = kv.view(kv.shape[0], -1, residual_depth) # B, 100 , D
     
     q = self.norm(q)
@@ -131,31 +136,51 @@ def step(x,y,pts):
   opt.step()
   return loss
 
-#%%
-train_data = cycle([gen_data(100, randorder=False) for _ in range(100)])
+def test():
+  global test_data
+  errs = [F.cross_entropy(net(x,pts).view(-1, n_toks), y.view(-1)).item() for x,y,pts in test_data]
+  return sum(errs) / len(errs)
 
+from torch.optim.lr_scheduler import StepLR
+from utils.data import gen_data, display, max_points
+
+#%%
+
+batchsize = 100 
+n_batches = 100
+
+gen_fn = lambda: gen_data(batchsize, quantize_pts=False)
+
+test_data = [gen_fn() for _ in range(n_batches)]
+train_data = cycle([gen_fn() for _ in range(n_batches)])
+#%%
 net = Model().to(device, dtype).train()
-opt = optim.Adam(net.parameters(), lr=1e-4)
+opt = optim.Adam(net.parameters(), lr=1e-3)
+
 
 epochs = 1000
-scheduler = StepLR(opt,10, gamma=0.99)
-# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs, eta_min=1e-5)
-# scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=epochs, pct_start=0.1)
-scheduler = torch.optim.lr_scheduler.CyclicLR(opt, base_lr=1e-5, max_lr=1e-3, step_size_up=epochs//10, cycle_momentum=False)
+opt = optim.Adam(net.parameters(), lr=1e-4)
+scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=epochs, pct_start=0.1)
 
 for e in range(epochs):
   x, y, pts = next(train_data)
-  try: loss = step(x, y, pts).item()
+  try: loss = step(x, y, pts)
   except KeyboardInterrupt:break
-  print(f"\r{e+1}/{epochs}: ",loss, end="")
-  if (e+1) % (epochs // 10) == 0: print()
+  print(f"\r{e+1}/{epochs}: ",loss.item(), end="")
+  if (e+1) % (epochs // 10) == 0: 
+    print(" val loss:", test())
+
   scheduler.step()
+
+
+#%%
 
 print ("******* INFERENCE ********")
 
 def generate(n):
   x = torch.zeros(1, 1).long()
-  _,_,pts = gen_data(1)
+  _,_,pts = gen_fn()
+  pts = pts[:1]
   for i in range(n):
     p = net(x[:,-99:], pts)
     choices = p[0,-1,:]
@@ -169,5 +194,3 @@ for i in range(5):
   plt.scatter(pts[0,:,0].cpu().numpy(), pts[0,:,1].cpu().numpy())
   plt.plot(*p[0,1:].reshape(-1,2).T.cpu())
   plt.show()
-
-# %%

@@ -35,14 +35,16 @@ n_toks = 100
 def tokenize(x): return ((x + 1) / 2 * (n_toks-1)).clamp(1, n_toks-1).long()
 
 max_points = 21
-def gen_data(n, randorder = False):
+def gen_data(n, randorder = False,quantize_shape = True,  quantize_pts = True):
   shapes = [random_shape() for _ in range(n)]
-  pts = tokenize(torch.stack([(pointcloud(s, 100)) for s in shapes]))
+  pts = torch.stack([(pointcloud(s, 100)) for s in shapes])
+  if quantize_pts: pts = tokenize(pts)
   if randorder: shapes = [s[torch.randperm(len(s))] for s in shapes]
-  y = torch.stack([torch.cat([tokenize(s), torch.zeros(max_points - len(s), 2)]) for s in shapes]).view(n, -1).long()
-  pad = torch.zeros(n, 1).long()
+  y = torch.stack([torch.cat([(tokenize(s) if quantize_shape else s), torch.zeros(max_points - len(s), 2)]) for s in shapes]).view(n, -1)
+  pad = torch.zeros(n, 1)
+  
   x = torch.cat([pad, y], dim=1)[:, :-1]
-  return x, y, pts
+  return (x.long(), y.long(), pts) if quantize_shape else(x, y, pts)
 
 
 def display(shape):

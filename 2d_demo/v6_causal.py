@@ -46,7 +46,7 @@ class LatentAttentionBlock(nn.Module):
     self.expand_dim = num_dim * expand_factor
     
 
-    self.norm       = nn.LayerNorm(self.dim, bias=False)
+    self.norm       = nn.LayerNorm(self.dim)
     self.expand     = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(2*self.qk_dim+2*self.expand_dim, self.dim))
     self.project    = nn.Parameter(1. * 1./residual_depth**.5 * 1./expand_factor * 1./num_blocks * torch.randn((self.dim, self.expand_dim),dtype=dtype))
     self.position_bias_mult = nn.Parameter(torch.tensor(1.))
@@ -74,7 +74,7 @@ class LatentCrossAttentionBlock(nn.Module):
     self.expand_dim = num_dim * expand_factor
     self.local_dim  = self.expand_dim - self.v_dim
     
-    self.norm       = nn.LayerNorm(self.dim, bias=False)
+    self.norm       = nn.LayerNorm(self.dim)
     self.Wq         = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.local_dim, self.dim))
     self.Wkv        = nn.Parameter(.5 * 1./residual_depth**.5 * 1./expand_factor * torch.randn(self.qk_dim + 2 * self.v_dim, self.dim))
     
@@ -90,7 +90,7 @@ class LatentCrossAttentionBlock(nn.Module):
     attention = F.scaled_dot_product_attention(query, key, geglu_value)
 
     out = F.linear(torch.cat([geglu_local, attention], dim=-1), self.project)
-    return residual + out    
+    return residual + out
 
 class Model(nn.Module):
   def __init__(self):
@@ -99,7 +99,7 @@ class Model(nn.Module):
     self.pt_emb = nn.Embedding(n_toks, residual_depth//2, scale_grad_by_freq=True)
     self.blocks = nn.ModuleList([LatentAttentionBlock(residual_depth) for _ in range(num_blocks)])
     self.blocks2 = nn.ModuleList([LatentCrossAttentionBlock(residual_depth) for _ in range(num_blocks)])
-    self.norm = nn.LayerNorm(residual_depth, bias=False)
+    self.norm = nn.LayerNorm(residual_depth)
     self.out = nn.Linear(residual_depth, n_toks, bias=False)
   
   def forward(self, q:torch.Tensor, pts:torch.Tensor):
