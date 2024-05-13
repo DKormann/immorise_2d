@@ -7,7 +7,6 @@ from torch import nn
 from torch.nn import functional as F
 from itertools import cycle
 
-
 torch.set_default_device('cuda')
 device = torch.device('cuda')
 # %%
