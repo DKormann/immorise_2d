@@ -174,7 +174,9 @@ def generate(n):
   for i in range(n):
     p = net(x[:,-99:], pts)
     choices = p[0,-1,:]
-    choice = choices.argmax(-1)
+    # choice = choices.argmax(-1)
+    choice = torch.multinomial(choices.softmax(-1),1)
+    
     x = torch.cat([x, choice.reshape(1,1)], dim=1)
   x = x.where(x != 0, torch.tensor(np.nan)).cpu()
   return x,pts
@@ -184,3 +186,5 @@ for i in range(5):
   plt.scatter(pts[0,:,0].cpu().numpy(), pts[0,:,1].cpu().numpy())
   plt.plot(*p[0,1:].reshape(-1,2).T.cpu())
   plt.show()
+
+# %%
