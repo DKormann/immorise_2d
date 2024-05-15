@@ -55,7 +55,10 @@ class LatentAttentionBlock(LatentBlock):
     query, key, linear, pre_gelu = F.linear(x, self.expand).split((self.qk_dim, self.qk_dim, self.expand_dim, self.expand_dim), dim=-1)
     geglu = linear * F.gelu(pre_gelu)
     geglu_local, geglu_attention_value = geglu.split((self.expand_dim-self.v_dim, self.v_dim), -1)
-    attention = F.scaled_dot_product_attention(query, key, geglu_attention_value, attn_mask=attn_mask)
+    # attention = F.scaled_dot_product_attention(query, key, geglu_attention_value, attn_mask=attn_mask)
+    attn_weight = torch.softmax((query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask, dim=-1)
+    attention = attn_weight @ geglu_attention_value
+
     out = F.linear(torch.cat([geglu_local, attention], dim=-1), self.project)
     x = residual + out
     return x
@@ -64,3 +67,20 @@ if __name__ == '__main__':
   block = LatentAttentionBlock()
   x = torch.randn(100, 384)
   out = block(x)
+
+#%%
+query = torch.randn(5, 100, 384)
+key = torch.randn(5, 100, 384)
+attn = query @ key.transpose(-2, -1)
+attn.shape
+#%%
+
+
+torch.einsum('bqd,bkd->bqkd', query, key) == query.unsqueeze(-2) * key.unsqueeze(-3)
+
+
+#%%
+
+a = torch.tensor([[1.,2.,3.],[0,0,0]])
+b = torch.tensor([[4.,5.,6.],[1,1,1]])
+torch.einsum('ak,bk->abk', a,b).sum(-1) == torch.einsum('ak,bk->ab', a,b)
