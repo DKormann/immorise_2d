@@ -15,11 +15,12 @@ device = torch.device('cuda')
 from utils.data import gen_data, display, max_points
 from utils.latent_attention import LatentAttentionBlock, LatentBlock
 #%%
-def genfn(n):return gen_data(n, False,True)
-batch_size = 100
-n_batches = 200
-train_data = cycle([genfn(batch_size) for _ in range(n_batches)])
-test_data = [genfn(100)]
+if __name__ == '__main__':
+  def genfn(n):return gen_data(n, False,True)
+  batch_size = 100
+  n_batches = 200
+  train_data = cycle([genfn(batch_size) for _ in range(n_batches)])
+  test_data = [genfn(100)]
 
 #%%
 x,y,_ = gen_data(1,False,True,False)
@@ -33,7 +34,7 @@ num_blocks = round(8 * np.log2(1.+model_scale))
 class AttentionLayer(LatentBlock):
   """ Efficient fused latent-space attention block. Linear keys and queries, nonlinear values."""
   def __init__(self, num_dim=384, max_seq_len= max_points*2, group_size=2., **kwargs):
-    super().__init__(num_dim, **kwargs)
+    super().__init__(num_dim,max_seq_len=max_seq_len, **kwargs)
     
     self.dim        = num_dim
     self.qk_dim     = self.dim // self.qk_dim_div
@@ -74,11 +75,11 @@ class Enc():
 
 #%%
 class Model(nn.Module):
-  def __init__(self, group_size=2):
+  def __init__(self, group_size=2, max_seq_len=max_points*2):
     super().__init__()
     self.emb, self.group_size = Enc(), group_size
     self.group_emb = nn.Parameter(torch.randn(1,1,group_size, residual_depth))
-    self.blocks = nn.Sequential(*[AttentionLayer(residual_depth) for _ in range(num_blocks)])
+    self.blocks = nn.Sequential(*[AttentionLayer(residual_depth,max_seq_len=max_seq_len) for _ in range(num_blocks)])
     self.norm = nn.LayerNorm(residual_depth)
     self.out = nn.Linear(residual_depth, 100, bias=False)
   
@@ -91,34 +92,36 @@ class Model(nn.Module):
 # %%
 net = Model(group_size=2).cuda().train()
 opt = torch.optim.Adam(net.parameters(), lr=1e-4)
-scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, steps_per_epoch=n_batches, epochs=1000, pct_start=0.1)
 
 #%%
+
+
 epochs = 2000
-
-for i in range(epochs):
-  x,y,_ = next(train_data)
-  opt.zero_grad()
-  loss = F.cross_entropy(net(x.cuda()).reshape(-1, 100),y.flatten().cuda())
-  loss.backward()
-  opt.step()
-  print('\r', loss.item(),end='')
-  if (i+1) %(epochs//10) == 0:
-    print('test loss:', F.cross_entropy(net(test_data[0][0]).view(-1,100), test_data[0][1].view(-1)).item())
-  scheduler.step()
+if __name__ == '__main__':
+  scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, steps_per_epoch=n_batches, epochs=1000, pct_start=0.1)
+  for i in range(epochs):
+    x,y,_ = next(train_data)
+    opt.zero_grad()
+    loss = F.cross_entropy(net(x.cuda()).reshape(-1, 100),y.flatten().cuda())
+    loss.backward()
+    opt.step()
+    print('\r', loss.item(),end='')
+    if (i+1) %(epochs//10) == 0:
+      print('test loss:', F.cross_entropy(net(test_data[0][0]).view(-1,100), test_data[0][1].view(-1)).item())
+    scheduler.step()
 # %%
+if __name__ == '__main__':
+  print(" ********* Inference *********")
+  for i in range(10):
+    x = torch.zeros(1,1).long()
+    for i in range(max_points*2):
+      out = net(x)[0,-1:]
+      out = torch.multinomial(F.softmax(out, dim=-1), 1)
+      x = torch.cat([x, out[0].view(1,1)],1)
 
-print(" ********* Inference *********")
-for i in range(10):
-  x = torch.zeros(1,1).long()
-  for i in range(max_points*2):
-    out = net(x)[0,-1:]
-    out = torch.multinomial(F.softmax(out, dim=-1), 1)
-    x = torch.cat([x, out[0].view(1,1)],1)
-
-  d = x[0,1:-1]
-  d = d.where(d != 0, torch.tensor(np.nan)).cpu()
-  if d.shape[0] % 2 == 1: d = d[:-1]
-  d = d.view(-1,2).T
-  plt.plot(d[0],d[1])
-  plt.show()
+    d = x[0,1:-1]
+    d = d.where(d != 0, torch.tensor(np.nan)).cpu()
+    if d.shape[0] % 2 == 1: d = d[:-1]
+    d = d.view(-1,2).T
+    plt.plot(d[0],d[1])
+    plt.show()
