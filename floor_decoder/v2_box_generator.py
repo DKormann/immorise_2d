@@ -66,7 +66,6 @@ opt = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 #%%
 
-
 y = train_bxs
 x = torch.cat([torch.zeros(y.shape[0],1), y[:,:-1]],1)
 # %%
@@ -78,6 +77,7 @@ for e in range(epochs):
   loss.backward()
   opt.step()
   print('\r', loss.item(), end='')
+  
 # %%
 print(" ********* Inference *********")
 for i in range(10):
@@ -89,10 +89,10 @@ for i in range(10):
   
   x = x[0,1:]
   x = x[:(x.argmin()//4) * 4]
+  plt.xlim(0,100)
+  plt.ylim(0,100)
   for box in x.view(-1,4):
     drawbox(box.cpu(), color='gray')
-
-  
   break
 
 #%%
