@@ -1,43 +1,35 @@
 #%%
-import torch 
-from torch import nn
-from torch.nn import functional as F
+import torch
 from torchvision.datasets import MNIST
-import matplotlib.pyplot as plt
 
 torch.set_default_device('cuda')
-ds = MNIST('mnist', download=True)
-labels = ds.targets.cuda()
-points = torch.multinomial((ds.data.float().cuda()/256).view(-1,28*28), 100, replacement=True).float() 
+labels = MNIST('mnist', download=True).targets.cuda()
+points = torch.multinomial((MNIST('mnist').data.float().cuda()/256).view(-1,28*28), 100, replacement=True).float() 
 points = torch.stack([points % 28, 28 - points // 28], dim=-1)+torch.rand(*points.shape,2)*0.1
 
-# %%
-dim, layers, batch_size = 1024, 4, 100
-freqs = torch.exp(torch.arange(0, dim, 4).float() * -(7. / dim))
-
-init = lambda *s: nn.init.xavier_uniform_(torch.empty(*s,requires_grad=True))
-weights = [[init(dim, dim*3) , init(dim, dim*4), init(dim*4,(10 if i == layers-1  else dim))] for i in range(layers)]
+D, layers, B = 1024, 4, 100
+init = lambda *s: torch.nn.init.xavier_uniform_(torch.empty(*s,requires_grad=True))
+weights = [[init(D, D*3) , init(D, D*4), init(D*4,(10 if i == layers-1  else D))] for i in range(layers)]
 
 def forward(x):
-  x = x.unsqueeze(-1) * freqs
+  x = x.unsqueeze(-1) * torch.exp(torch.arange(0, D, 4).float() * -(7. / D))
   x = torch.cat([torch.sin(x), torch.cos(x)], -1).view(*x.shape[:-2],-1)
   for qkv, l1, out in weights:
     q,k,v = (x@qkv).chunk(3, dim=-1)
-    x = (((x + F.softmax((q @ k.transpose(-2, -1)) / (q.shape[-1])**.5,-1) @ v) @l1).relu()) @ out
+    x = (((x + ((q @ k.transpose(-2, -1)) / (q.shape[-1])**.5).softmax(-1) @ v) @l1).relu()) @ out
   return x.mean(1)
 
 opt = torch.optim.Adam(sum(weights, []), lr=1e-6)
-for i in range(0, len(points), batch_size):
-  x = points[i:i+batch_size]
-  y = labels[i:i+batch_size]
-  loss = F.cross_entropy(forward(x), y)
+for i in range(0, len(points), B):
+  x,y = points[i:i+B], labels[i:i+B]
+  loss = torch.nn.functional.cross_entropy(forward(x), y)
   opt.zero_grad()
   loss.backward()
   opt.step()
   print(f'\r{i}/{len(points)}', loss.item(), end='')
 
 #%%
-
+# import matplotlib.pyplot as plt
 # k = 0
 # plt.xlim(0, 28)
 # plt.ylim(0, 28)
