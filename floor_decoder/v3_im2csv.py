@@ -16,6 +16,7 @@ torch.set_default_device('cuda')
 idata = idata.cuda().reshape(idata.shape[0], 8*8, np.prod(idata.shape[-2:]))
 
 
+
 # %%
 
 maxlen = max([len(shape) for shape in shapes])
@@ -30,6 +31,12 @@ sdata = [discretize(shape) for shape in shapes]
 for s in sdata: s[:,1::2] = ntoks - s[:,1::2]
 
 sdata = torch.stack([F.pad(shape, (0, 0, 0, maxlen - len(shape))) for shape in sdata]).reshape(-1, maxlen*4)
+
+#%%
+
+test_idata, idata = idata[:5], idata[5:]
+test_sdata, sdata = sdata[:5], sdata[5:]
+
 
 #%%
 def plot_image(img):
@@ -52,12 +59,12 @@ def plot_image(img):
 
 def plot_shape(shape):
   shape = shape.view(-1,2,2).cpu()
-  shape = shape[:(shape==0).nonzero()[0,0]]
+  idx = (shape==0).nonzero()
+  if len(idx) >0:shape = shape[:idx[0,0]]
   plt.axis('equal')
   for i,e in enumerate(shape):plt.plot(e[:,0],e[:,1], color=plt.cm.viridis(i/len(shape)))
   plt.show()
 
-plot_shape(sdata[-1])
 
 
 #%%
@@ -131,11 +138,13 @@ assert net(torch.zeros(1, maxlen*4), idata[0:1]).shape == torch.Size([1, max_seq
 
 
 #%%
+opt = torch.optim.Adam(net.parameters(), lr=1e-5)
+
 epochs = 2000
 batch_size = 4
 n_batches = len(sdata) // batch_size + 1
 if __name__ == '__main__':
-  scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, steps_per_epoch=n_batches, epochs=epochs, pct_start=0.1)
+  # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, steps_per_epoch=n_batches, epochs=epochs, pct_start=0.1)
   try:
     for e in range(epochs):
       for i in range(0,len(sdata),batch_size):
@@ -143,17 +152,19 @@ if __name__ == '__main__':
         patches = idata[i:i+batch_size]
 
         x = F.pad(y, (1, 0, 0, 0))[:,:-1]
-        
         opt.zero_grad()
-
         p = net(x.cuda(), patches.cuda())[:,8*8:]
         loss = F.cross_entropy(p.reshape(-1, 100),y.flatten().cuda())
         loss.backward()
         opt.step()
         print('\r', loss.item(),end='')
-        if (e % (epochs//10) == 0) and (i == 0):
-          print(f'\n{e}')
-        scheduler.step()
+        if (e % (10) == 0) and (i == 0):
+          with torch.no_grad():
+            test_y = F.pad(test_sdata, (1, 0, 0, 0))[:,:-1]
+            test_p = net(test_y.cuda(), test_idata.cuda())[:,8*8:]
+            test_loss = F.cross_entropy(test_p.reshape(-1, 100),test_y.flatten().cuda())
+            print(f' e: {e} val: {test_loss.item()}')
+        # scheduler.step()
   except KeyboardInterrupt: pass
 
 # %%
@@ -163,9 +174,9 @@ if __name__ == '__main__':
   print(" ********* Inference *********")
   for i in range(1):
     x = torch.zeros(1,1).long()
-    for i in range(maxlen*2):
+    for i in range(maxlen*4):
       k = 2
-      out = net(x,idata[k:k+1])[0,-1:]
+      out = net(x,test_idata[k:k+1])[0,-1:]
       out = torch.argmax(out).view(1,1)
       x = torch.cat([x, out[0].view(1,1)],1)
 
@@ -173,6 +184,7 @@ if __name__ == '__main__':
     # d = d.where(d!=0, torch.tensor(torch.nan))
     d = d[:len(d)//4*4].view(-1,2,2).cpu()
     plot_shape(d)
+    plot_image(test_idata[k])
 
 #%%
 

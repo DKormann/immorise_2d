@@ -42,12 +42,10 @@ for proj in proj_files:
           shape.append(arr)
       
       shapes.append(np.stack(shape))
+  
+  
       
-      # plt.axis("equal")
-      # for i,edge in enumerate(shapes[-1]):
-      #   color = plt.cm.viridis(i/len(shapes[-1]))
-      #   plt.plot(edge[[0,2]], edge[[1,3]], color=color)
-      # plt.show()
+
 
 assert len(images) == len(shapes)
 #%%
