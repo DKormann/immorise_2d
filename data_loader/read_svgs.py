@@ -27,33 +27,32 @@ fmax = np.max([room.max(0) for floor in floors for room in floor],0)
 
 #%%
 
-imsize = np.array([4000,4000])
-floor = floors[1]
-
 #%%
 
+imsize = np.array([4000,4000])
 
-def rasterize(floor):
+def transform(floor):
 
-  fmax = np.max([room.max(0) for room in floor],0)
-  imsize - fmax
-  rand_pad = np.random.rand(2) * (imsize - fmax)
-  floor = [np.float32(rand_pad) + room for room in floor]
-
-  ax_swap = np.random.rand() > 0.5
-  x_swap = np.random.rand() > 0.5
-  y_swap = np.random.rand() > 0.5
-  mirrored = ax_swap ^ x_swap ^ y_swap
-
+  randpad = np.random.rand(2) * (imsize - np.max([room.max(0) for room in floor],0))
+  floor = [np.float32(randpad) + room for room in floor]
+  x_swap,y_swap,ax_swap = np.random.rand(3) > 0.5
   for room in floor: 
     if ax_swap: room[:] = room[:,[1,0]]
-    if x_swap: room[:,0] = imsize[0] - room[:,0]
-    if y_swap: room[:,1] = imsize[1] - room[:,1]
+  return floor
 
+def rasterize(floor, distortion = False):
   image = Image.new("L", (*imsize,),0)
   for polygon in floor: ImageDraw.Draw(image).polygon(polygon.copy(), fill=1)
+  image = image.rotate(np.random.rand()*360, expand=True)
+  if distortion: 
+    # TODO: Add distortion
+    pass
   return np.array(image)
 
 
-plt.imshow(pixel_array, cmap='gray')
-# %%
+
+for floor in floors[:10]:
+  image = transform(floor)
+  image = rasterize(image,True)
+  plt.imshow(image, cmap='gray')
+  plt.show()
