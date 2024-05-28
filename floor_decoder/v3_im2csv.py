@@ -16,7 +16,6 @@ torch.set_default_device('cuda')
 idata = idata.cuda().reshape(idata.shape[0], 8*8, np.prod(idata.shape[-2:]))
 
 
-
 # %%
 
 maxlen = max([len(shape) for shape in shapes])
@@ -138,9 +137,9 @@ assert net(torch.zeros(1, maxlen*4), idata[0:1]).shape == torch.Size([1, max_seq
 
 
 #%%
-opt = torch.optim.Adam(net.parameters(), lr=1e-5)
+opt = torch.optim.Adam(net.parameters(), lr=1e-6)
 
-epochs = 2000
+epochs = 1000
 batch_size = 4
 n_batches = len(sdata) // batch_size + 1
 if __name__ == '__main__':
@@ -175,8 +174,8 @@ if __name__ == '__main__':
   for i in range(1):
     x = torch.zeros(1,1).long()
     for i in range(maxlen*4):
-      k = 2
-      out = net(x,test_idata[k:k+1])[0,-1:]
+      k = 3
+      out = net(x,idata[k:k+1])[0,-1:]
       out = torch.argmax(out).view(1,1)
       x = torch.cat([x, out[0].view(1,1)],1)
 
@@ -184,7 +183,7 @@ if __name__ == '__main__':
     # d = d.where(d!=0, torch.tensor(torch.nan))
     d = d[:len(d)//4*4].view(-1,2,2).cpu()
     plot_shape(d)
-    plot_image(test_idata[k])
+    plot_image(idata[k])
 
 #%%
 

@@ -14,10 +14,6 @@ proj_files = os.listdir(datapath)
 #%%
 c = 16
 
-# for proj in proj_files:
-#   path = os.path.join(datapath, proj)
-
-
 images = []
 
 shapes = []
@@ -42,9 +38,6 @@ for proj in proj_files:
           shape.append(arr)
       
       shapes.append(np.stack(shape))
-  
-  
-      
 
 
 assert len(images) == len(shapes)
@@ -61,7 +54,6 @@ def crop_zero(image):
   return image[ystart:yend, xstart:xend]
 
 images = [crop_zero(i) for i in images]
-
 
 
 #%%
