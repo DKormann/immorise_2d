@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw
 import numpy as np
 
 #%%
-datapath = os.path.expanduser("~/datasets/ImagesGT/")
+datapath = os.path.expanduser("/shared/datasets/ImagesGT/")
 
 proj_files = os.listdir(datapath)
 floors = []
@@ -22,26 +22,36 @@ for proj in proj_files:
     floors.append(floor)
 
 floors = [[room - np.min([room.min(0) for room in floor], axis=0) for room in floor] for floor in floors]
-fmax = np.max([room.max(0) for floor in floors for room in floor],0)
+floors = [[room / np.max([room.max() for room in floor],0) for room in floor] for floor in floors]
+np.max([room.max(0) for floor in floors for room in floor],0)
+
 
 
 #%%
-
-imsize = np.array([4000,4000])
+imsize = np.array([1000,1000])
 
 def transform(floor):
-  randpad = np.random.rand(2) * (imsize - np.max([room.max(0) for room in floor],0))
+  randpad = np.random.rand(2) * (np.max([room.max(0) for room in floor],0))
   floor = [np.float32(randpad) + room for room in floor]
   x_swap,y_swap,ax_swap = np.random.rand(3) > 0.5
   for room in floor: 
     if ax_swap: room[:] = room[:,[1,0]]
   return floor
 
+
+#%%
+floor = floors[0]
+floor = transform(floor)
+floor[0]*imsize
+# plt.imshow(rasterize(floor), cmap='gray')
+
+#%%
+
 def rasterize(floor, distortion = False):
   image = Image.new("L", (*imsize,),0)
-  for polygon in floor: ImageDraw.Draw(image).polygon(polygon.copy(), fill=1)
-  image = image.rotate(np.random.rand()*360, expand=True)
+  for polygon in floor: ImageDraw.Draw(image).polygon(polygon.copy()*imsize, fill=1)
   if distortion: 
+    image = image.rotate(np.random.rand()*360, expand=True)
     # TODO: Add distortion
     pass
   return np.array(image)
@@ -57,8 +67,10 @@ edges = [get_edgeset(floor) for floor in floors]
 
 #%%
 
-for floor in floors[:10]:
+for i,floor in enumerate(floors):
   image = transform(floor)
-  image = rasterize(image,True)
+  # image=  floor
+  image = rasterize(image,False)
+  print(i)
   plt.imshow(image, cmap='gray')
   plt.show()
