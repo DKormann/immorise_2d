@@ -19,20 +19,17 @@ for proj in proj_files:
         line = line.split("points=\"" )[1].split("\"")[0]
         room = [point.split(",") for point in line.split(" ") if point != '']
         floor.append(np.array(room, dtype=np.float32).reshape(-1, 2))
-    
     floors.append(floor)
 
 floors = [[room - np.min([room.min(0) for room in floor], axis=0) for room in floor] for floor in floors]
 fmax = np.max([room.max(0) for floor in floors for room in floor],0)
 
-#%%
 
 #%%
 
 imsize = np.array([4000,4000])
 
 def transform(floor):
-
   randpad = np.random.rand(2) * (imsize - np.max([room.max(0) for room in floor],0))
   floor = [np.float32(randpad) + room for room in floor]
   x_swap,y_swap,ax_swap = np.random.rand(3) > 0.5
@@ -48,8 +45,17 @@ def rasterize(floor, distortion = False):
     # TODO: Add distortion
     pass
   return np.array(image)
+#%%
+def get_edgeset(floor):
+  floor = [np.concatenate([room, room[:1]], axis=0) for room in floor]
+  edges = []
+  for room in floor:
+    edges.extend([np.concatenate([room[:-1],room[1:]],axis=1)])
+  edges = np.concatenate(edges)
+  return edges
+edges = [get_edgeset(floor) for floor in floors]
 
-
+#%%
 
 for floor in floors[:10]:
   image = transform(floor)
