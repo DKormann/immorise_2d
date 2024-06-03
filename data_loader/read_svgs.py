@@ -57,8 +57,6 @@ train_floors, test_floors = floors[:100], floors[100:]
 max_edges = 102
 n_toks = 100
 
-
-
 def get_edges(floors):
   edges = []
   for floor in floors:
@@ -72,11 +70,29 @@ def get_edges(floors):
 
 import torch 
 
+def add_noise(imgs, edgs):
+  for i in range(len(edgs)):
+    img = imgs[i]
+    edg = edgs[i].reshape(-1,4)
+    n = 100
+    randimage = torch.randint(0,2, img.shape)
+    for i in range(n):
+      e = edg[np.random.randint(0, len(edg))] * 10
+      t = np.random.rand()
+      p = (e[:2] * (1-t) + e[2:] * t).long()
+      r = np.random.randint(8, 40)
+      fn = torch.min if np.random.rand() > 0.5 else torch.max
+      img[p[1]-r:p[1]+r, p[0]-r:p[0]+r] = fn(randimage[p[1]-r:p[1]+r, p[0]-r:p[0]+r],img[ p[1]-r:p[1]+r, p[0]-r:p[0]+r]) 
+  return imgs
+
 def get_batch(floors):
   floors = [transform(floor) for floor in floors]
   images = np.stack([rasterize(floor) for floor in floors])
   edges = get_edges(floors).reshape(-1, max_edges*4)
-  return torch.tensor(images), torch.tensor(edges)
+  img, edg =  torch.tensor(images), torch.tensor(edges)
+  img = add_noise(img, edg)
+
+  return img, edg
 
 get_train_batch = lambda: get_batch(train_floors)
 get_test_batch = lambda: get_batch(test_floors)
@@ -85,37 +101,10 @@ get_test_batch = lambda: get_batch(test_floors)
 #%%
 img, edg = get_train_batch()
 
-def add_noise(img, edg):
-
-  img = img[0]
-  edg = edg[0].reshape(-1,4)
-
-  n = 100
-  randimage = torch.randint(0,2, img.shape)
-  for i in range(n):
 
 
-    e = edg[np.random.randint(0, len(edg))] * 10
-    # edgelens = torch.norm(edg[:,2:].float()- edg[:,:2].float(), dim=1)
-    # print(edgelens)
-    # randix = torch.multinomial(edgelens, 1)
-    # print(randix)
-    # e = edg[randix] * 10
-    # print(e)
-    t = np.random.rand()
-    p = (e[:2] * (1-t) + e[2:] * t).long()
-    r = np.random.randint(8, 40)
-    fn = torch.min if np.random.rand() > 0.5 else torch.max
-    img[p[1]-r:p[1]+r, p[0]-r:p[0]+r] = fn(randimage[p[1]-r:p[1]+r, p[0]-r:p[0]+r],img[ p[1]-r:p[1]+r, p[0]-r:p[0]+r]) 
-
-
-  plt.imshow(img, cmap='gray')
-
-
-add_noise(img, edg)
 #%%
 
 if __name__ == "__main__":
   img, edg = get_train_batch()
   print(img.shape, edg.shape)
-
