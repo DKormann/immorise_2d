@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import os
 from PIL import Image, ImageDraw
 import numpy as np
+import torch
 
 #%%
 datapath = os.path.expanduser("/shared/datasets/ImagesGT/")
@@ -33,19 +34,30 @@ def transform(floor):
   floor = [np.float32(randpad) + room for room in floor]
   x_swap,y_swap,ax_swap = np.random.rand(3) > 0.5
   for room in floor: 
-    if ax_swap: room[:] = room[:,[1,0]]
+    if ax_swap: room[:] = room[::-1,[1,0]]
+    if x_swap: room[:,0] = 1 - room[:,0]
+    if y_swap: room[:,1] = 1 - room[:,1]
+    room_top = room[:].mean(1).argmax()
+    room = np.concatenate([room[:room_top], room[room_top:]])
+
+  floor = sorted(floor, key=lambda x: x[:,1].mean())
   return floor
+
+#%%
+
 
 def rasterize(floor):
   image = Image.new("L", (*imsize,),0)
   for polygon in floor: 
     ImageDraw.Draw(image).polygon(polygon.copy() * 1000, fill=1)
-  image = image.rotate(np.random.randint(0,4)*90, expand=True)
+  # image = image.rotate(np.random.randint(0,4)*90, expand=True)
   return np.array(image)
 
 train_floors, test_floors = floors[:100], floors[100:]
 max_edges = 102
 n_toks = 100
+
+
 
 def get_edges(floors):
   edges = []
@@ -75,4 +87,5 @@ get_test_batch = lambda: get_batch(test_floors)
 
 if __name__ == "__main__":
   img, edg = get_train_batch()
+  print(img.shape, edg.shape)
 
