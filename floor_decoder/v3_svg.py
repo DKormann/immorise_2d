@@ -20,14 +20,12 @@ images, edg = get_train_batch()
 
 #%%
 
-
-
 splits = 10
 
 def split_image(img):
   return img.reshape(-1, splits, 1000//splits, splits, 1000//splits).permute(0,1,3,2,4).reshape(-1, splits**2, 1000//splits, 1000//splits)
 
-img = split_image(images[0])
+img = split_image(images[:10])
 def plot_image(img):
   fig, axes = plt.subplots(nrows=splits, ncols=splits, figsize=(10,10))
   axes = axes.flatten()
@@ -94,14 +92,16 @@ class Model(nn.Module):
   def __init__(self, max_seq_len=max_seq_len):
     super().__init__()
     self.freqs = torch.exp(torch.arange(0, residual_depth, 2).float() * -(9. / residual_depth))
-    self.linpatchenc = init_weights(idata.shape[-1], residual_depth)
-    self.pospatchenc = init_weights(8*8, residual_depth)
+    self.linpatchenc = init_weights(100**2, residual_depth)
+    self.pospatchenc = init_weights(100, residual_depth)
 
     self.blocks = nn.Sequential(*[AttentionLayer(residual_depth,max_seq_len=max_seq_len) for _ in range(num_blocks)])
     self.out = nn.Linear(residual_depth, 100, bias=False)
     self.norm = nn.LayerNorm(residual_depth)
   
   def forward(self, q:torch.Tensor, patches:torch.Tensor):
+
+    patches = patches.reshape(patches.shape[0], 100, 100**2).float()
     patches = patches @ self.linpatchenc
     patches = patches + self.pospatchenc
     q = self.freqs * q.unsqueeze(-1)
@@ -113,37 +113,38 @@ class Model(nn.Module):
 
 net = Model()
 opt = torch.optim.Adam(net.parameters(), lr=1e-4)
-assert net(torch.zeros(1, max_edges*4), img).shape == torch.Size([1, max_seq_len, 100])
+
+assert net(torch.zeros(1, max_edges*4), img[:1]).shape == torch.Size([1, max_seq_len, 100])
 
 
 #%%
-opt = torch.optim.Adam(net.parameters(), lr=1e-6)
+opt = torch.optim.Adam(net.parameters(), lr=1e-5)
 
 epochs = 1000
-batch_size = 4
-n_batches = len(sdata) // batch_size + 1
+batch_size = 8
+n_batches = len(images) // batch_size + 1
 if __name__ == '__main__':
   # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, steps_per_epoch=n_batches, epochs=epochs, pct_start=0.1)
   try:
     for e in range(epochs):
-      for i in range(0,len(sdata),batch_size):
-        y = sdata[i:i+batch_size]
-        patches = idata[i:i+batch_size]
-
-        x = F.pad(y, (1, 0, 0, 0))[:,:-1]
+      img, edg = get_train_batch()
+      for i in range(0,len(images),batch_size):
+        patches = split_image(img[i:i+batch_size])
+        y = edg[i:i+batch_size]
+        x = F.pad(y, ( 1, 0, 0, 0))[:,:-1]
         opt.zero_grad()
-        p = net(x.cuda(), patches.cuda())[:,8*8:]
-        loss = F.cross_entropy(p.reshape(-1, 100),y.flatten().cuda())
+        p = net(x.cuda(), patches.cuda())[:,100:]
+        loss = F.cross_entropy(p.reshape(-1, 100),y.flatten().long())
         loss.backward()
+        print(f'\r e: {e} i: {i} loss: {loss.item()}', end='')
         opt.step()
-        print('\r', loss.item(),end='')
         if (e % (10) == 0) and (i == 0):
           with torch.no_grad():
-            test_y = F.pad(test_sdata, (1, 0, 0, 0))[:,:-1]
-            test_p = net(test_y.cuda(), test_idata.cuda())[:,8*8:]
-            test_loss = F.cross_entropy(test_p.reshape(-1, 100),test_y.flatten().cuda())
-            print(f' e: {e} val: {test_loss.item()}')
-        # scheduler.step()
+            test_img, test_y = get_test_batch()
+            test_patches = split_image(test_img)
+            test_p = net(F.pad(test_y, ( 1, 0, 0, 0))[:,:-1], test_patches.cuda())[:,100:]
+            test_loss = F.cross_entropy(test_p.reshape(-1, 100),test_y.flatten().long())
+            print(f' test_loss: {test_loss.item()}')
   except KeyboardInterrupt: pass
 
-
+# %%

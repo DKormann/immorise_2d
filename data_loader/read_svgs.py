@@ -64,7 +64,7 @@ import torch
 def get_batch(floors):
   floors = [transform(floor) for floor in floors]
   images = np.stack([rasterize(floor) for floor in floors])
-  edges = get_edges(floors)
+  edges = get_edges(floors).reshape(-1, max_edges*4)
   return torch.tensor(images), torch.tensor(edges)
 
 get_train_batch = lambda: get_batch(train_floors)
@@ -75,3 +75,4 @@ get_test_batch = lambda: get_batch(test_floors)
 
 if __name__ == "__main__":
   img, edg = get_train_batch()
+
