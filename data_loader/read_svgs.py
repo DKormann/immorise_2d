@@ -1,6 +1,5 @@
 #%% 
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 from PIL import Image, ImageDraw
 import numpy as np
@@ -107,21 +106,21 @@ class RandomRainForGrayscale(A.RandomRain):
 
 # ignoring mixup, I believe it to be unecessarily complex for data augmentations. Instead I am adding RandomBrightnessContrast
 non_geometric_transformations = A.Compose([
-    RandomRainForGrayscale(brightness_coefficient=1, drop_width=3, blur_value=5, p=1),
-    A.GaussNoise(var_limit=(50.0, 100.0), p=1),
+    # RandomRainForGrayscale(brightness_coefficient=0.5, drop_width=1, blur_value=3, p=1),
+    A.GaussNoise(var_limit=(1e-21, 1e-20), p=1),
 ])
 
 def augment_images(imgs):
   imgs = list(imgs)
   augmented_imgs = []
   for img in imgs:
-    img = img.cpu()
-    img_np = img.numpy()
+    img_np = img.cpu().numpy()
     augmented_img_np = non_geometric_transformations(image=img_np)["image"]
     augmented_img = torch.from_numpy(augmented_img_np)
     augmented_imgs.append(augmented_img)
 
-  return_img = torch.stack(augmented_imgs)
+  return_img = torch.stack(augmented_imgs, dim=0)
+
   return return_img
 # %%
 
