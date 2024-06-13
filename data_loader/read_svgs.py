@@ -8,6 +8,15 @@ import torch
 import albumentations as A
 import cv2
 
+# %%
+if torch.cuda.is_available():
+	device = "cuda"
+elif torch.backends.mps.is_available():
+	device = "mps"
+else:
+	device = "cpu"
+   
+torch.set_default_device(device)
 #%%
 datapath = os.path.expanduser("/shared/datasets/ImagesGT/")
 
@@ -85,13 +94,37 @@ def add_noise(imgs, edgs):
       img[p[1]-r:p[1]+r, p[0]-r:p[0]+r] = fn(randimage[p[1]-r:p[1]+r, p[0]-r:p[0]+r],img[ p[1]-r:p[1]+r, p[0]-r:p[0]+r]) 
   return imgs
 
+max_shear = 10
+target_str = 'floor_plan'
+
+class RandomRainForGrayscale(A.RandomRain):
+    def apply(self, img, **params):
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        img = super().apply(img, **params)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return img
+
+# ignoring mixup, I believe it to be unecessarily complex for data augmentations. Instead I am adding RandomBrightnessContrast
+non_geometric_transformations = A.Compose([
+    RandomRainForGrayscale(brightness_coefficient=0.9, drop_width=1, blur_value=1, p=0.5),
+    A.GaussNoise(p=1),
+])
+
+def augment_images(imgs):
+  imgs = imgs.cpu().numpy()
+  augmented_imgs = []
+  for img in imgs:
+    augmented_imgs.append(torch.from_numpy(non_geometric_transformations(image=img)["image"]))
+
+  return torch.from_numpy(imgs)
+
 def get_batch(floors):
   floors = [transform(floor) for floor in floors]
   images = np.stack([rasterize(floor) for floor in floors])
   edges = get_edges(floors).reshape(-1, max_edges*4)
   imgs, edges =  torch.tensor(images), torch.tensor(edges)
   imgs = add_noise(imgs, edges)
-
+  imgs = augment_images(imgs)
   return imgs, edges
 
 get_train_batch = lambda: get_batch(train_floors)
@@ -108,3 +141,5 @@ img, edg = get_train_batch()
 if __name__ == "__main__":
   img, edg = get_train_batch()
   print(img.shape, edg.shape)
+
+# %%

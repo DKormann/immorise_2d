@@ -9,13 +9,22 @@ from torch.nn import functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 
-torch.set_default_device('cuda')
-
 from data_loader.read_svgs import imsize, n_toks, max_edges, get_test_batch, get_train_batch
 
+# %%
+if torch.cuda.is_available():
+	device = "cuda"
+elif torch.backends.mps.is_available():
+	device = "mps"
+else:
+	device = "cpu"
+   
+torch.set_default_device(device)
 
 # %%
 images, edg = get_train_batch()
+images = images.to(device)
+edg = edg.to(device)
 
 splits = 10
 
@@ -113,7 +122,6 @@ class Model(nn.Module):
     self.norm = nn.LayerNorm(residual_depth)
   
   def forward(self, q:torch.Tensor, patches:torch.Tensor):
-
     patches = patches.reshape(-1,1, 100, 100).float()
     for enc in self.encoder:
       patches = enc(patches)
@@ -129,10 +137,10 @@ class Model(nn.Module):
     return self.out(r)
 
 net = Model()
+net.to(device)
 opt = torch.optim.Adam(net.parameters(), lr=1e-4)
 
 assert net(torch.zeros(2, max_edges*4), img[:2]).shape == torch.Size([2, max_seq_len, 100])
-
 
 #%%
 opt = torch.optim.Adam(net.parameters(), lr=1e-5)
@@ -182,3 +190,4 @@ for i in range(max_edges*4):
 
 plot_image(img[0])
 plot_shape(x[0,1:])
+# %%
