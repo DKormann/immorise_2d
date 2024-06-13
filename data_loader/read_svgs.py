@@ -97,6 +97,7 @@ def add_noise(imgs, edgs):
 max_shear = 10
 target_str = 'floor_plan'
 
+# %%
 class RandomRainForGrayscale(A.RandomRain):
     def apply(self, img, **params):
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -106,17 +107,23 @@ class RandomRainForGrayscale(A.RandomRain):
 
 # ignoring mixup, I believe it to be unecessarily complex for data augmentations. Instead I am adding RandomBrightnessContrast
 non_geometric_transformations = A.Compose([
-    RandomRainForGrayscale(brightness_coefficient=0.9, drop_width=1, blur_value=1, p=0.5),
-    A.GaussNoise(p=1),
+    RandomRainForGrayscale(brightness_coefficient=1, drop_width=3, blur_value=5, p=1),
+    A.GaussNoise(var_limit=(50.0, 100.0), p=1),
 ])
 
 def augment_images(imgs):
-  imgs = imgs.cpu().numpy()
+  imgs = list(imgs)
   augmented_imgs = []
   for img in imgs:
-    augmented_imgs.append(torch.from_numpy(non_geometric_transformations(image=img)["image"]))
+    img = img.cpu()
+    img_np = img.numpy()
+    augmented_img_np = non_geometric_transformations(image=img_np)["image"]
+    augmented_img = torch.from_numpy(augmented_img_np)
+    augmented_imgs.append(augmented_img)
 
-  return torch.from_numpy(imgs)
+  return_img = torch.stack(augmented_imgs)
+  return return_img
+# %%
 
 def get_batch(floors):
   floors = [transform(floor) for floor in floors]
@@ -129,12 +136,6 @@ def get_batch(floors):
 
 get_train_batch = lambda: get_batch(train_floors)
 get_test_batch = lambda: get_batch(test_floors)
-
-
-#%%
-img, edg = get_train_batch()
-
-
 
 #%%
 
