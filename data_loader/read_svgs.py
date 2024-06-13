@@ -5,6 +5,8 @@ import os
 from PIL import Image, ImageDraw
 import numpy as np
 import torch
+import albumentations as A
+import cv2
 
 #%%
 datapath = os.path.expanduser("/shared/datasets/ImagesGT/")
@@ -68,8 +70,6 @@ def get_edges(floors):
     edges.append(floor_edges)
   return np.stack(edges)
 
-import torch 
-
 def add_noise(imgs, edgs):
   for i in range(len(edgs)):
     img = imgs[i]
@@ -89,10 +89,10 @@ def get_batch(floors):
   floors = [transform(floor) for floor in floors]
   images = np.stack([rasterize(floor) for floor in floors])
   edges = get_edges(floors).reshape(-1, max_edges*4)
-  img, edg =  torch.tensor(images), torch.tensor(edges)
-  img = add_noise(img, edg)
+  imgs, edges =  torch.tensor(images), torch.tensor(edges)
+  imgs = add_noise(imgs, edges)
 
-  return img, edg
+  return imgs, edges
 
 get_train_batch = lambda: get_batch(train_floors)
 get_test_batch = lambda: get_batch(test_floors)
